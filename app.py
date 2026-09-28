@@ -1,199 +1,26 @@
 import streamlit as st
 import pandas as pd
-import json
-import os
 import numpy as np
+import json
+from pathlib import Path
+
 
 # ============================================================
 # PAGE CONFIGURATION
 # ============================================================
 
 st.set_page_config(
-    page_title="ScaleWise | AI Bioprocess Copilot",
+    page_title="ScaleWise — AI Copilot",
     page_icon="🧬",
     layout="wide"
 )
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-
-# ============================================================
-# DATA LOADERS
-# ============================================================
-
-def load_json(filename):
-    path = os.path.join(BASE_DIR, filename)
-
-    if not os.path.exists(path):
-        return {}
-
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def load_csv(filename):
-    path = os.path.join(BASE_DIR, filename)
-
-    if not os.path.exists(path):
-        return pd.DataFrame()
-
-    try:
-        return pd.read_csv(path)
-    except Exception:
-        return pd.DataFrame()
-
-
-dashboard_data = load_json(
-    "ai_copilot_dashboard_data.json"
-)
-
-operating_window_raw = load_csv(
-    "model2_operating_window.csv"
-)
-
-representative_condition = load_csv(
-    "model2_representative_condition.csv"
-)
-
-guardian_df = load_csv(
-    "model3_guardian_data.csv"
-)
-
-threshold_data = load_json(
-    "model3_alert_threshold.json"
-)
-
-
-# ============================================================
-# HELPER FUNCTIONS
-# ============================================================
-
-def first_available(dictionary, keys, default=None):
-
-    if not isinstance(dictionary, dict):
-        return default
-
-    for key in keys:
-        if key in dictionary:
-            return dictionary[key]
-
-    return default
-
-
-def clean_number(value, decimals=2):
-
-    try:
-        value = float(value)
-
-        if np.isnan(value):
-            return "--"
-
-        return f"{value:.{decimals}f}"
-
-    except Exception:
-        return "--"
-
-
-def get_rep_value(row, keys, default=None):
-
-    if row is None:
-        return default
-
-    for key in keys:
-
-        if key in row.index:
-
-            value = row[key]
-
-            if pd.notna(value):
-                return value
-
-    return default
-
-
-# ============================================================
-# DASHBOARD DATA EXTRACTION
-# ============================================================
-
-readiness = dashboard_data.get(
-    "readiness",
-    {}
-)
-
-categories = readiness.get(
-    "categories",
-    {}
-)
-
-target_scale_data = dashboard_data.get(
-    "target_scale",
-    {}
-)
-
-biology = dashboard_data.get(
-    "biology",
-    {}
-)
-
-engineering = dashboard_data.get(
-    "engineering",
-    {}
-)
-
-ai_recommendation = dashboard_data.get(
-    "ai_recommendation",
-    {}
-)
-
-overall_score = first_available(
-    readiness,
-    ["overall_score", "score"],
-    71.65
-)
-
-status = first_available(
-    readiness,
-    ["status"],
-    "VALIDATE"
-)
-
-target_scale = first_available(
-    target_scale_data,
-    ["target_scale_L", "target_scale"],
-    20
-)
-
-
-# ============================================================
-# REPRESENTATIVE CONDITION
-# ============================================================
-
-if not representative_condition.empty:
-
-    rep_row = representative_condition.iloc[0]
-
-else:
-
-    rep_row = pd.Series(dtype=object)
-
-
-# ============================================================
-# TARGET SCALE
-# ============================================================
-
-# Current prototype is based on the recovered 20 L scenario.
-SUPPORTED_SCALE = float(target_scale)
 
 
 # ============================================================
 # CUSTOM CSS
 # ============================================================
 
-st.markdown(
-    """
+st.markdown("""
 <style>
 
 .main-title {
@@ -204,46 +31,711 @@ st.markdown(
 
 .subtitle {
     font-size: 16px;
-    color: #8b949e;
-    margin-bottom: 25px;
+    color: #9aa4b2;
+    margin-bottom: 28px;
 }
 
 .section-title {
     font-size: 23px;
+    font-weight: 750;
+    margin-top: 28px;
+    margin-bottom: 16px;
+}
+
+.small-label {
+    font-size: 13px;
+    color: #9aa4b2;
+}
+
+.copilot-header {
+    font-size: 20px;
     font-weight: 700;
-    margin-top: 30px;
-    margin-bottom: 15px;
 }
 
 .copilot-box {
-    padding: 24px;
+    padding: 18px;
     border-radius: 14px;
-    background-color: #f5f7fa;
-    border-left: 6px solid #4c78a8;
+    border: 1px solid rgba(100, 130, 170, 0.35);
+    background: rgba(70, 100, 140, 0.12);
+    margin-top: 10px;
     margin-bottom: 15px;
-    color: #111827 !important;
 }
 
-.copilot-box b {
-    color: #111827 !important;
+.info-box {
+    padding: 15px;
+    border-radius: 12px;
+    background: rgba(70, 110, 160, 0.15);
+    border-left: 4px solid #4c9be8;
 }
 
-.copilot-box p {
-    color: #111827 !important;
+.warning-box {
+    padding: 15px;
+    border-radius: 12px;
+    background: rgba(190, 150, 30, 0.15);
+    border-left: 4px solid #d6ad36;
 }
 
-.demo-note {
-    padding: 12px 15px;
-    border-radius: 10px;
-    background-color: #fff7d6;
-    color: #4b3b00;
-    border: 1px solid #e5d58a;
-    margin-bottom: 18px;
+.success-box {
+    padding: 15px;
+    border-radius: 12px;
+    background: rgba(40, 150, 100, 0.15);
+    border-left: 4px solid #35b77a;
+}
+
+.danger-box {
+    padding: 15px;
+    border-radius: 12px;
+    background: rgba(190, 60, 60, 0.15);
+    border-left: 4px solid #d65c5c;
 }
 
 </style>
-""",
-    unsafe_allow_html=True
+""", unsafe_allow_html=True)
+
+
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
+
+BASE_DIR = Path(__file__).resolve().parent
+
+
+def find_file(candidates):
+    """
+    Find a file in the Streamlit repository.
+    Checks root directory first, then subdirectories.
+    """
+
+    for name in candidates:
+
+        direct = BASE_DIR / name
+
+        if direct.exists():
+            return direct
+
+    for name in candidates:
+
+        matches = list(BASE_DIR.rglob(name))
+
+        if matches:
+            return matches[0]
+
+    return None
+
+
+def load_json(candidates, default=None):
+
+    path = find_file(candidates)
+
+    if path is None:
+        return default
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    except Exception:
+        return default
+
+
+def load_csv(candidates):
+
+    path = find_file(candidates)
+
+    if path is None:
+        return None
+
+    try:
+        return pd.read_csv(path)
+
+    except Exception:
+        return None
+
+
+def safe_get(obj, key, default=None):
+
+    try:
+
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+
+        if isinstance(obj, pd.Series):
+            return obj.get(key, default)
+
+        return default
+
+    except Exception:
+        return default
+
+
+def number(value, default=None):
+
+    try:
+        if value is None:
+            return default
+
+        if pd.isna(value):
+            return default
+
+        return float(value)
+
+    except Exception:
+        return default
+
+
+def fmt(value, decimals=2, suffix=""):
+
+    value = number(value)
+
+    if value is None:
+        return "N/A"
+
+    return f"{value:.{decimals}f}{suffix}"
+
+
+def find_nested(data, possible_keys):
+
+    """
+    Recursively search JSON dictionaries for common keys.
+    """
+
+    if isinstance(data, dict):
+
+        for key in possible_keys:
+
+            if key in data:
+                return data[key]
+
+        for value in data.values():
+
+            result = find_nested(value, possible_keys)
+
+            if result is not None:
+                return result
+
+    elif isinstance(data, list):
+
+        for item in data:
+
+            result = find_nested(item, possible_keys)
+
+            if result is not None:
+                return result
+
+    return None
+
+
+# ============================================================
+# LOAD MODEL 2 / DASHBOARD DATA
+# ============================================================
+
+dashboard_summary_json = load_json(
+    [
+        "model2_dashboard_summary.json",
+        "dashboard_summary.json"
+    ],
+    {}
+)
+
+scorecard_json = load_json(
+    [
+        "model2_scorecard.json",
+        "dashboard_scorecard.json"
+    ],
+    {}
+)
+
+representative_df = load_csv(
+    [
+        "model2_representative_condition.csv",
+        "dashboard_representative_condition.csv"
+    ]
+)
+
+window_df = load_csv(
+    [
+        "model2_window.csv",
+        "dashboard_operating_window.csv",
+        "model2_operating_window.csv"
+    ]
+)
+
+
+# ============================================================
+# LOAD MODEL 3 / RISK GUARDIAN DATA
+# ============================================================
+
+guardian_df = load_csv(
+    [
+        "model3_guardian_df.csv",
+        "model3_guardian.csv",
+        "risk_guardian.csv",
+        "guardian_df.csv"
+    ]
+)
+
+threshold_json = load_json(
+    [
+        "model3_alert_threshold.json",
+        "risk_alert_threshold.json"
+    ],
+    {}
+)
+
+
+# ============================================================
+# FALLBACK DEMO VALUES
+# ============================================================
+
+# These values correspond to the recovered demonstration scenario.
+# They are only used if the exported JSON files are unavailable.
+
+DEFAULT_SCORE = 71.65
+DEFAULT_STATUS = "VALIDATE"
+DEFAULT_SCALE = 20.0
+
+DEFAULT_CATEGORIES = {
+    "Biological Condition": 72.3,
+    "Oxygen Transfer": 70.0,
+    "Hydrodynamic Condition": 36.7,
+    "Process Control": 100.0,
+    "Model Reliability": 100.0
+}
+
+
+# ============================================================
+# READINESS VALUES
+# ============================================================
+
+dashboard_score = find_nested(
+    dashboard_summary_json,
+    ["overall_score", "readiness_score", "score"]
+)
+
+if dashboard_score is None:
+
+    dashboard_score = find_nested(
+        scorecard_json,
+        ["overall_score", "readiness_score", "score"]
+    )
+
+dashboard_score = number(
+    dashboard_score,
+    DEFAULT_SCORE
+)
+
+
+dashboard_status = find_nested(
+    dashboard_summary_json,
+    ["status", "readiness_status"]
+)
+
+if dashboard_status is None:
+
+    dashboard_status = find_nested(
+        scorecard_json,
+        ["status", "readiness_status"]
+    )
+
+dashboard_status = (
+    str(dashboard_status)
+    if dashboard_status is not None
+    else DEFAULT_STATUS
+)
+
+
+dashboard_target_scale = find_nested(
+    dashboard_summary_json,
+    ["target_scale", "dashboard_target_scale"]
+)
+
+dashboard_target_scale = number(
+    dashboard_target_scale,
+    DEFAULT_SCALE
+)
+
+
+# ============================================================
+# READINESS CATEGORIES
+# ============================================================
+
+dashboard_categories = find_nested(
+    dashboard_summary_json,
+    ["categories", "readiness_categories"]
+)
+
+if dashboard_categories is None:
+
+    dashboard_categories = find_nested(
+        scorecard_json,
+        ["categories", "readiness_categories"]
+    )
+
+
+if not isinstance(dashboard_categories, dict):
+
+    dashboard_categories = DEFAULT_CATEGORIES.copy()
+
+
+# Convert nested category structures to numeric scores
+
+clean_categories = {}
+
+for name, value in dashboard_categories.items():
+
+    if isinstance(value, dict):
+
+        score = value.get(
+            "score",
+            value.get(
+                "value",
+                value.get("category_score")
+            )
+        )
+
+    else:
+        score = value
+
+    score = number(score)
+
+    if score is not None:
+        clean_categories[str(name)] = score
+
+
+if len(clean_categories) == 0:
+
+    clean_categories = DEFAULT_CATEGORIES.copy()
+
+
+# ============================================================
+# REPRESENTATIVE CONDITION
+# ============================================================
+
+if representative_df is not None and len(representative_df) > 0:
+
+    dashboard_row = representative_df.iloc[0]
+
+else:
+
+    # Fallback based on recovered Model 2 result
+    dashboard_row = pd.Series({
+        "scale_L": 20.0,
+        "working_volume_L": 17.361,
+        "tank_diameter_m": 0.217,
+        "impeller_diameter_m": 0.072,
+        "rpm": 217.360,
+        "aeration_vvm": 0.487,
+        "DO_percent": 53.629,
+        "temperature_C": 37.036,
+        "pH": 7.003,
+        "feed_rate_mL_h": 0.335,
+        "VCD_million_cells_mL": 0.6247,
+        "viability_percent": 97.9684,
+        "growth_rate_per_h": -0.0050,
+        "lactate_g_L": 0.2161,
+        "PV_W_L": 0.014,
+        "kLa_per_h": 5.382,
+        "mixing_time_s": 168.4,
+        "tip_speed_m_s": 0.820,
+        "reynolds_number": 18790
+    })
+
+
+# ============================================================
+# EXTRACT REPRESENTATIVE VALUES
+# ============================================================
+
+rep_scale = safe_get(
+    dashboard_row,
+    "scale_L",
+    dashboard_target_scale
+)
+
+rep_working_volume = safe_get(
+    dashboard_row,
+    "working_volume_L"
+)
+
+rep_tank_diameter = safe_get(
+    dashboard_row,
+    "tank_diameter_m"
+)
+
+rep_impeller_diameter = safe_get(
+    dashboard_row,
+    "impeller_diameter_m"
+)
+
+rep_rpm = safe_get(
+    dashboard_row,
+    "rpm"
+)
+
+rep_aeration = safe_get(
+    dashboard_row,
+    "aeration_vvm"
+)
+
+rep_do = safe_get(
+    dashboard_row,
+    "DO_percent"
+)
+
+rep_temperature = safe_get(
+    dashboard_row,
+    "temperature_C"
+)
+
+rep_ph = safe_get(
+    dashboard_row,
+    "pH"
+)
+
+rep_feed = safe_get(
+    dashboard_row,
+    "feed_rate_mL_h"
+)
+
+rep_vcd = safe_get(
+    dashboard_row,
+    "VCD_million_cells_mL"
+)
+
+rep_viability = safe_get(
+    dashboard_row,
+    "viability_percent"
+)
+
+rep_growth = safe_get(
+    dashboard_row,
+    "growth_rate_per_h"
+)
+
+rep_lactate = safe_get(
+    dashboard_row,
+    "lactate_g_L"
+)
+
+rep_pv = safe_get(
+    dashboard_row,
+    "PV_W_L"
+)
+
+rep_kla = safe_get(
+    dashboard_row,
+    "kLa_per_h"
+)
+
+rep_mixing = safe_get(
+    dashboard_row,
+    "mixing_time_s"
+)
+
+rep_tip = safe_get(
+    dashboard_row,
+    "tip_speed_m_s"
+)
+
+rep_re = safe_get(
+    dashboard_row,
+    "reynolds_number"
+)
+
+
+# ============================================================
+# OPERATING WINDOW
+# ============================================================
+
+# Recovered Model 2 window
+# Used as fallback if CSV is not available.
+
+window_fallback = pd.DataFrame({
+    "Parameter": [
+        "Agitation (RPM)",
+        "Aeration (vvm)",
+        "DO (%)"
+    ],
+    "Minimum": [
+        152.440,
+        0.223,
+        44.870
+    ],
+    "Representative": [
+        217.360,
+        0.487,
+        53.629
+    ],
+    "Maximum": [
+        239.000,
+        0.575,
+        53.629
+    ]
+})
+
+
+if window_df is None or len(window_df) == 0:
+
+    dashboard_operating_window = window_fallback.copy()
+
+else:
+
+    dashboard_operating_window = window_df.copy()
+
+    # Normalize common column names
+
+    rename_map = {}
+
+    for col in dashboard_operating_window.columns:
+
+        low = str(col).lower()
+
+        if low in ["parameter", "parameters"]:
+            rename_map[col] = "Parameter"
+
+        elif low in ["minimum", "min"]:
+            rename_map[col] = "Minimum"
+
+        elif low in ["representative", "recommended", "nominal"]:
+            rename_map[col] = "Representative"
+
+        elif low in ["maximum", "max"]:
+            rename_map[col] = "Maximum"
+
+    dashboard_operating_window = (
+        dashboard_operating_window
+        .rename(columns=rename_map)
+    )
+
+
+# ============================================================
+# RISK GUARDIAN
+# ============================================================
+
+if guardian_df is None or len(guardian_df) == 0:
+
+    # Fallback Guardian observation
+    guardian_df = pd.DataFrame({
+        "timestamp": pd.date_range(
+            end=pd.Timestamp.now(),
+            periods=100,
+            freq="h"
+        ),
+        "scale_L": [dashboard_target_scale] * 100,
+        "DO_percent": np.linspace(50, 54, 100),
+        "oxygen_margin": np.linspace(0.10, 0.15, 100),
+        "failure_probability": np.linspace(0.05, 0.30, 100),
+        "risk_score": np.linspace(5, 30, 100),
+        "risk_level": ["WATCH"] * 100,
+        "warning_signal_count": [0] * 100,
+        "risk_reason": [
+            "No active rule-based warning signals."
+        ] * 100,
+        "recommended_action": [
+            "Continue monitoring process trajectory."
+        ] * 100,
+        "model_confidence": np.linspace(10, 60, 100)
+    })
+
+
+# Parse timestamp
+
+if "timestamp" in guardian_df.columns:
+
+    guardian_df["timestamp"] = pd.to_datetime(
+        guardian_df["timestamp"],
+        errors="coerce"
+    )
+
+
+# Target-scale Guardian data
+
+guardian_target = guardian_df.copy()
+
+if "scale_L" in guardian_target.columns:
+
+    scale_difference = (
+        guardian_target["scale_L"].astype(float)
+        - float(dashboard_target_scale)
+    ).abs()
+
+    target_rows = guardian_target[
+        scale_difference < 1e-6
+    ]
+
+    if len(target_rows) > 0:
+        guardian_target = target_rows.copy()
+
+
+# Sort chronologically
+
+if "timestamp" in guardian_target.columns:
+
+    guardian_target = guardian_target.sort_values(
+        "timestamp"
+    )
+
+
+current_guardian = guardian_target.iloc[-1]
+
+
+# ============================================================
+# CURRENT RISK VALUES
+# ============================================================
+
+risk_probability = number(
+    safe_get(
+        current_guardian,
+        "failure_probability"
+    )
+)
+
+risk_level = str(
+    safe_get(
+        current_guardian,
+        "risk_level",
+        "UNKNOWN"
+    )
+)
+
+risk_score = number(
+    safe_get(
+        current_guardian,
+        "risk_score"
+    )
+)
+
+warning_count = int(
+    number(
+        safe_get(
+            current_guardian,
+            "warning_signal_count",
+            0
+        ),
+        0
+    )
+)
+
+risk_reason = str(
+    safe_get(
+        current_guardian,
+        "risk_reason",
+        "No active rule-based warning signals detected."
+    )
+)
+
+risk_action = str(
+    safe_get(
+        current_guardian,
+        "recommended_action",
+        "Continue monitoring the process trajectory."
+    )
+)
+
+risk_confidence = number(
+    safe_get(
+        current_guardian,
+        "model_confidence"
+    )
 )
 
 
@@ -252,20 +744,16 @@ st.markdown(
 # ============================================================
 
 st.markdown(
-    """
-    <div class="main-title">
-    🧬 ScaleWise — AI Copilot for Scalable Cell-Culture Bioprocess Design
-    </div>
-    """,
+    '<div class="main-title">'
+    '🧬 ScaleWise — AI Copilot for Scalable Cell-Culture Bioprocess Design'
+    '</div>',
     unsafe_allow_html=True
 )
 
 st.markdown(
-    """
-    <div class="subtitle">
-    Predict the biology • Optimize the operating window • Monitor scale-up risk
-    </div>
-    """,
+    '<div class="subtitle">'
+    'Predict the biology • Optimize the operating window • Monitor scale-up risk'
+    '</div>',
     unsafe_allow_html=True
 )
 
@@ -278,7 +766,7 @@ st.sidebar.header("⚙️ Process Configuration")
 
 st.sidebar.metric(
     "Demo Target Scale",
-    f"{SUPPORTED_SCALE:.0f} L"
+    f"{dashboard_target_scale:.0f} L"
 )
 
 process_stage = st.sidebar.selectbox(
@@ -291,8 +779,8 @@ process_stage = st.sidebar.selectbox(
 )
 
 st.sidebar.info(
-    "Current prototype scenario: "
-    f"{SUPPORTED_SCALE:.0f} L target scale."
+    f"Current prototype scenario: "
+    f"{dashboard_target_scale:.0f} L target scale."
 )
 
 st.sidebar.warning(
@@ -316,21 +804,21 @@ with c1:
 
     st.metric(
         "Target Scale",
-        f"{SUPPORTED_SCALE:.0f} L"
+        f"{dashboard_target_scale:.0f} L"
     )
 
 with c2:
 
     st.metric(
         "Overall Readiness",
-        f"{float(overall_score):.2f} / 100"
+        f"{dashboard_score:.2f} / 100"
     )
 
 with c3:
 
     st.metric(
         "Status",
-        str(status)
+        dashboard_status
     )
 
 
@@ -343,63 +831,38 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-category_keys = [
-    "Biological Condition",
-    "Oxygen Transfer",
-    "Hydrodynamic Condition",
-    "Process Control",
-    "Model Reliability"
-]
+category_names = list(clean_categories.keys())
 
-category_cols = st.columns(5)
+# Guarantee five slots
 
-for col, category_name in zip(
-    category_cols,
-    category_keys
-):
+while len(category_names) < 5:
 
-    category_value = categories.get(
-        category_name,
-        {}
+    category_names.append(
+        f"Category {len(category_names) + 1}"
     )
 
-    # Categories are dictionaries containing score/weight/details.
-    if isinstance(category_value, dict):
 
-        score = first_available(
-            category_value,
-            ["score", "value", "category_score"],
-            None
-        )
+cols = st.columns(5)
 
-    else:
+for i in range(5):
 
-        score = category_value
+    name = category_names[i]
 
-    with col:
+    value = clean_categories.get(
+        name,
+        None
+    )
 
-        if score is not None:
+    with cols[i]:
 
-            try:
-
-                st.metric(
-                    category_name,
-                    f"{float(score):.1f} / 100"
-                )
-
-            except Exception:
-
-                st.metric(
-                    category_name,
-                    str(score)
-                )
-
-        else:
-
-            st.metric(
-                category_name,
-                "--"
+        st.metric(
+            name,
+            (
+                f"{value:.1f} / 100"
+                if value is not None
+                else "N/A"
             )
+        )
 
 
 # ============================================================
@@ -411,96 +874,15 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-if not operating_window_raw.empty:
-
-    # --------------------------------------------------------
-    # The recovered CSV stores the operating window as rows
-    # representing minimum / representative / maximum values.
-    # --------------------------------------------------------
-
-    window_display = pd.DataFrame(
-        columns=[
-            "Parameter",
-            "Minimum",
-            "Representative",
-            "Maximum"
-        ]
-    )
-
-    # Case 1:
-    # Three rows containing the three operating conditions.
-    if len(operating_window_raw) >= 3:
-
-        row_min = operating_window_raw.iloc[0]
-        row_rep = operating_window_raw.iloc[1]
-        row_max = operating_window_raw.iloc[2]
-
-        parameter_map = {
-            "Agitation (RPM)": "agitation_rpm",
-            "Aeration (vvm)": "aeration_vvm",
-            "DO (%)": "DO_percent"
-        }
-
-        rows = []
-
-        for display_name, column_name in parameter_map.items():
-
-            if column_name in operating_window_raw.columns:
-
-                rows.append(
-                    {
-                        "Parameter": display_name,
-                        "Minimum": row_min[column_name],
-                        "Representative": row_rep[column_name],
-                        "Maximum": row_max[column_name]
-                    }
-                )
-
-        window_display = pd.DataFrame(rows)
-
-    if not window_display.empty:
-
-        # Format numbers
-        for column in [
-            "Minimum",
-            "Representative",
-            "Maximum"
-        ]:
-
-            window_display[column] = pd.to_numeric(
-                window_display[column],
-                errors="coerce"
-            )
-
-        st.dataframe(
-            window_display.style.format(
-                {
-                    "Minimum": "{:.3f}",
-                    "Representative": "{:.3f}",
-                    "Maximum": "{:.3f}"
-                }
-            ),
-            use_container_width=True,
-            hide_index=True
-        )
-
-    else:
-
-        st.dataframe(
-            operating_window_raw,
-            use_container_width=True,
-            hide_index=True
-        )
-
-else:
-
-    st.warning(
-        "Operating-window data unavailable."
-    )
+st.dataframe(
+    dashboard_operating_window,
+    use_container_width=True,
+    hide_index=True
+)
 
 
 # ============================================================
-# REPRESENTATIVE TARGET-SCALE CONDITION
+# REPRESENTATIVE CONDITION
 # ============================================================
 
 st.markdown(
@@ -508,64 +890,19 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-rep_display = {
-    "Scale": get_rep_value(
-        rep_row,
-        ["scale_L"],
-        SUPPORTED_SCALE
-    ),
-    "Working Volume": get_rep_value(
-        rep_row,
-        ["working_volume_L"]
-    ),
-    "Tank Diameter": get_rep_value(
-        rep_row,
-        ["tank_diameter_m"]
-    ),
-    "Impeller Diameter": get_rep_value(
-        rep_row,
-        ["impeller_diameter_m"]
-    ),
-    "Agitation": get_rep_value(
-        rep_row,
-        ["rpm", "agitation_rpm"]
-    ),
-    "Aeration": get_rep_value(
-        rep_row,
-        ["aeration_vvm"]
-    ),
-    "DO": get_rep_value(
-        rep_row,
-        ["DO_percent"]
-    ),
-    "Temperature": get_rep_value(
-        rep_row,
-        ["temperature_C"]
-    ),
-    "pH": get_rep_value(
-        rep_row,
-        ["pH"]
-    ),
-    "Feed Rate": get_rep_value(
-        rep_row,
-        ["feed_rate_mL_h"]
-    )
-}
+r1, r2, r3, r4 = st.columns(4)
 
-# Display first four
-rep_cols = st.columns(4)
+with r1:
+    st.metric("Scale", fmt(rep_scale, 3, " L"))
 
-for col, (label, value) in zip(
-    rep_cols,
-    list(rep_display.items())[:4]
-):
+with r2:
+    st.metric("Working Volume", fmt(rep_working_volume, 3, " L"))
 
-    with col:
+with r3:
+    st.metric("Tank Diameter", fmt(rep_tank_diameter, 3, " m"))
 
-        st.metric(
-            label,
-            clean_number(value, 3)
-        )
+with r4:
+    st.metric("Impeller Diameter", fmt(rep_impeller_diameter, 3, " m"))
 
 
 # ============================================================
@@ -579,72 +916,32 @@ st.markdown(
 
 b1, b2, b3, b4 = st.columns(4)
 
-vcd = first_available(
-    biology,
-    ["VCD_million_cells_mL", "VCD"],
-    get_rep_value(
-        rep_row,
-        ["VCD_million_cells_mL"],
-        0
-    )
-)
-
-viability = first_available(
-    biology,
-    ["viability_percent", "Viability"],
-    get_rep_value(
-        rep_row,
-        ["viability_percent"],
-        0
-    )
-)
-
-growth = first_available(
-    biology,
-    ["growth_rate_per_h", "Growth Rate"],
-    get_rep_value(
-        rep_row,
-        ["growth_rate_per_h"],
-        0
-    )
-)
-
-lactate = first_available(
-    biology,
-    ["lactate_g_L", "Lactate"],
-    get_rep_value(
-        rep_row,
-        ["lactate_g_L"],
-        0
-    )
-)
-
 with b1:
 
     st.metric(
         "VCD",
-        f"{float(vcd):.3f} M cells/mL"
+        fmt(rep_vcd, 3, " M cells/mL")
     )
 
 with b2:
 
     st.metric(
         "Viability",
-        f"{float(viability):.2f}%"
+        fmt(rep_viability, 2, "%")
     )
 
 with b3:
 
     st.metric(
         "Growth Rate",
-        f"{float(growth):.4f} /h"
+        fmt(rep_growth, 4, " /h")
     )
 
 with b4:
 
     st.metric(
         "Lactate",
-        f"{float(lactate):.3f} g/L"
+        fmt(rep_lactate, 3, " g/L")
     )
 
 
@@ -657,178 +954,45 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-
-# ------------------------------------------------------------
-# Pull directly from representative condition first.
-# ------------------------------------------------------------
-
-pv = get_rep_value(
-    rep_row,
-    ["PV_W_L", "PV_engineered_W_L"]
-)
-
-kla = get_rep_value(
-    rep_row,
-    ["kLa_per_h"]
-)
-
-mixing = get_rep_value(
-    rep_row,
-    ["mixing_time_s"]
-)
-
-tip_speed = get_rep_value(
-    rep_row,
-    ["tip_speed_m_s", "tip_speed_engineered_m_s"]
-)
-
-reynolds = get_rep_value(
-    rep_row,
-    ["reynolds_number", "Re_engineered"]
-)
-
-do_value = get_rep_value(
-    rep_row,
-    ["DO_percent"]
-)
-
-
-# ------------------------------------------------------------
-# If values are missing, calculate from geometry/process data.
-# ------------------------------------------------------------
-
-rpm = get_rep_value(
-    rep_row,
-    ["rpm", "agitation_rpm"]
-)
-
-impeller_diameter = get_rep_value(
-    rep_row,
-    ["impeller_diameter_m"]
-)
-
-working_volume = get_rep_value(
-    rep_row,
-    ["working_volume_L"]
-)
-
-# Tip speed = pi * D * N
-if (
-    (tip_speed is None or pd.isna(tip_speed))
-    and rpm is not None
-    and impeller_diameter is not None
-):
-
-    tip_speed = (
-        np.pi
-        * float(impeller_diameter)
-        * float(rpm)
-        / 60.0
-    )
-
-
-# Reynolds number = rho * N * D^2 / mu
-if (
-    (reynolds is None or pd.isna(reynolds))
-    and rpm is not None
-    and impeller_diameter is not None
-):
-
-    rho = 1000.0
-    mu = 0.001
-    N = float(rpm) / 60.0
-    D = float(impeller_diameter)
-
-    reynolds = (
-        rho * N * D**2 / mu
-    )
-
-
-# Engineering summary may contain the value if CSV does not.
-if pv is None:
-
-    pv = first_available(
-        engineering,
-        ["PV_W_L", "PV_engineered_W_L"],
-        0
-    )
-
-if kla is None:
-
-    kla = first_available(
-        engineering,
-        ["kLa_per_h"],
-        0
-    )
-
-if mixing is None:
-
-    mixing = first_available(
-        engineering,
-        ["mixing_time_s"],
-        0
-    )
-
-if do_value is None:
-
-    do_value = first_available(
-        engineering,
-        ["DO_percent"],
-        0
-    )
-
-
 e1, e2, e3 = st.columns(3)
 
 with e1:
-
     st.metric(
         "P/V",
-        f"{float(pv):.3f} W/L"
-        if pv is not None else "--"
+        fmt(rep_pv, 4, " W/L")
     )
 
 with e2:
-
     st.metric(
         "kLa",
-        f"{float(kla):.3f} /h"
-        if kla is not None else "--"
+        fmt(rep_kla, 3, " /h")
     )
 
 with e3:
-
     st.metric(
         "Mixing Time",
-        f"{float(mixing):.1f} s"
-        if mixing is not None else "--"
+        fmt(rep_mixing, 1, " s")
     )
 
 
 e4, e5, e6 = st.columns(3)
 
 with e4:
-
     st.metric(
         "Tip Speed",
-        f"{float(tip_speed):.3f} m/s"
-        if tip_speed is not None else "--"
+        fmt(rep_tip, 3, " m/s")
     )
 
 with e5:
-
     st.metric(
         "Reynolds Number",
-        f"{float(reynolds):,.0f}"
-        if reynolds is not None else "--"
+        fmt(rep_re, 0)
     )
 
 with e6:
-
     st.metric(
         "DO",
-        f"{float(do_value):.2f}%"
-        if do_value is not None else "--"
+        fmt(rep_do, 2, "%")
     )
 
 
@@ -841,391 +1005,754 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-guardian_current = pd.DataFrame()
+g1, g2, g3, g4 = st.columns(4)
 
-if not guardian_df.empty:
+with g1:
 
-    guardian_working = guardian_df.copy()
+    if risk_probability is not None:
 
-    # Parse timestamps
-    if "timestamp" in guardian_working.columns:
-
-        guardian_working["timestamp"] = pd.to_datetime(
-            guardian_working["timestamp"],
-            errors="coerce"
-        )
-
-    # --------------------------------------------------------
-    # IMPORTANT:
-    # Use the selected/current demo scale instead of simply
-    # taking the last row of the entire dataset.
-    # --------------------------------------------------------
-
-    if "scale_L" in guardian_working.columns:
-
-        scale_match = guardian_working[
-            np.isclose(
-                pd.to_numeric(
-                    guardian_working["scale_L"],
-                    errors="coerce"
-                ),
-                SUPPORTED_SCALE
-            )
-        ].copy()
-
-    else:
-
-        scale_match = guardian_working.copy()
-
-
-    if not scale_match.empty:
-
-        scale_match = scale_match.sort_values(
-            "timestamp"
-        )
-
-        guardian_current = scale_match.tail(1)
-
-
-    if not guardian_current.empty:
-
-        latest = guardian_current.iloc[0]
-
-        probability = float(
-            latest.get(
-                "failure_probability",
-                0
-            )
-        )
-
-        risk_level = str(
-            latest.get(
-                "risk_level",
-                "UNKNOWN"
-            )
-        )
-
-        confidence = float(
-            latest.get(
-                "model_confidence",
-                0
-            )
-        )
-
-        warning_count = int(
-            latest.get(
-                "warning_signal_count",
-                0
-            )
-        )
-
-        r1, r2, r3, r4 = st.columns(4)
-
-        with r1:
-
-            st.metric(
-                "Deviation Probability",
-                f"{probability * 100:.1f}%"
-            )
-
-        with r2:
-
-            st.metric(
-                "Risk Level",
-                risk_level
-            )
-
-        with r3:
-
-            st.metric(
-                "Model Confidence",
-                f"{confidence:.1f}%"
-            )
-
-        with r4:
-
-            st.metric(
-                "Warning Signals",
-                warning_count
-            )
-
-
-        risk_reason = str(
-            latest.get(
-                "risk_reason",
-                "No active risk driver identified."
-            )
-        )
-
-        recommended_action = str(
-            latest.get(
-                "recommended_action",
-                "Continue monitoring."
-            )
-        )
-
-        if risk_level.upper() in [
-            "HIGH",
-            "CRITICAL"
-        ]:
-
-            st.warning(
-                f"⚠️ **Risk signal:** {risk_reason}"
-            )
-
-        else:
-
-            st.info(
-                f"ℹ️ **Risk signal:** {risk_reason}"
-            )
-
-
-        st.info(
-            f"🔧 **Recommended action:** {recommended_action}"
-        )
-
-        st.caption(
-            "Risk Guardian output is based on the synthetic/demo "
-            "process stream. Model confidence is classification "
-            "confidence, not biological certainty."
+        st.metric(
+            "Deviation Probability",
+            f"{risk_probability * 100:.1f}%"
         )
 
     else:
 
-        st.info(
-            "No Guardian observation available for the current "
-            f"{SUPPORTED_SCALE:.0f} L demo scenario."
+        st.metric(
+            "Deviation Probability",
+            "N/A"
         )
 
-else:
 
-    st.info(
-        "Risk Guardian data unavailable."
+with g2:
+
+    st.metric(
+        "Risk Level",
+        risk_level
     )
 
 
+with g3:
+
+    if risk_confidence is not None:
+
+        st.metric(
+            "Classification Confidence",
+            f"{risk_confidence:.1f}%"
+        )
+
+    else:
+
+        st.metric(
+            "Classification Confidence",
+            "N/A"
+        )
+
+
+with g4:
+
+    st.metric(
+        "Warning Signals",
+        warning_count
+    )
+
+
+# Risk interpretation
+
+if risk_probability is not None and risk_probability >= 0.70:
+
+    st.warning(
+        "⚠️ Risk Guardian predicts a high probability of an upcoming "
+        "process deviation in the simulated process stream."
+    )
+
+elif risk_probability is not None and risk_probability >= 0.40:
+
+    st.warning(
+        "⚠️ Risk Guardian indicates a WATCH/HIGH risk pattern "
+        "requiring process review."
+    )
+
+else:
+
+    st.success(
+        "✅ No high-probability deviation pattern is currently detected."
+    )
+
+
+st.info(
+    "Risk Guardian output is based on the synthetic/demo process stream. "
+    "Classification confidence is not biological certainty."
+)
+
+
 # ============================================================
-# RISK GUARDIAN TRENDS
+# RISK EXPLANATION
 # ============================================================
 
-if not guardian_df.empty:
+st.markdown(
+    '<div class="section-title">🔎 Current Risk Explanation</div>',
+    unsafe_allow_html=True
+)
+
+if warning_count > 0:
 
     st.markdown(
-        '<div class="section-title">📈 Risk Guardian Trends</div>',
+        f"""
+        <div class="warning-box">
+        <b>{warning_count} rule-based warning signal(s) detected.</b>
+        <br><br>
+        {risk_reason}
+        <br><br>
+        <b>Recommended action:</b><br>
+        {risk_action}
+        </div>
+        """,
         unsafe_allow_html=True
     )
 
-    trend_df = guardian_df.copy()
+else:
 
-    if "scale_L" in trend_df.columns:
-
-        trend_df = trend_df[
-            np.isclose(
-                pd.to_numeric(
-                    trend_df["scale_L"],
-                    errors="coerce"
-                ),
-                SUPPORTED_SCALE
-            )
-        ].copy()
-
-    if "timestamp" in trend_df.columns:
-
-        trend_df["timestamp"] = pd.to_datetime(
-            trend_df["timestamp"],
-            errors="coerce"
-        )
-
-        trend_df = trend_df.dropna(
-            subset=["timestamp"]
-        )
-
-        trend_df = trend_df.sort_values(
-            "timestamp"
-        )
-
-    # --------------------------------------------------------
-    # Risk probability chart
-    # --------------------------------------------------------
-
-    if (
-        not trend_df.empty
-        and "failure_probability" in trend_df.columns
-    ):
-
-        risk_chart = trend_df[
-            ["timestamp", "failure_probability"]
-        ].copy()
-
-        risk_chart = risk_chart.set_index(
-            "timestamp"
-        )
-
-        risk_chart["failure_probability"] *= 100
-
-        st.caption(
-            "Failure/deviation probability across the simulated "
-            f"{SUPPORTED_SCALE:.0f} L process stream."
-        )
-
-        st.line_chart(
-            risk_chart,
-            use_container_width=True
-        )
-
-
-    # --------------------------------------------------------
-    # Process condition chart
-    # --------------------------------------------------------
-
-    process_columns = [
-        c for c in [
-            "DO_percent",
-            "oxygen_margin"
-        ]
-        if c in trend_df.columns
-    ]
-
-    if (
-        not trend_df.empty
-        and process_columns
-    ):
-
-        process_chart = trend_df[
-            ["timestamp"] + process_columns
-        ].copy()
-
-        process_chart = process_chart.set_index(
-            "timestamp"
-        )
-
-        st.caption(
-            "Process-condition trends."
-        )
-
-        st.line_chart(
-            process_chart,
-            use_container_width=True
-        )
-
-
-# ============================================================
-# AI COPILOT ASSESSMENT
-# ============================================================
-
-st.markdown(
-    '<div class="section-title">🤖 AI Copilot Assessment</div>',
-    unsafe_allow_html=True
-)
-
-
-# ------------------------------------------------------------
-# Generate a robust recommendation if JSON structure differs.
-# ------------------------------------------------------------
-
-recommendation = first_available(
-    ai_recommendation,
-    [
-        "recommendation",
-        "message",
-        "summary",
-        "copilot_recommendation"
-    ],
-    None
-)
-
-if recommendation is None:
-
-    recommendation = (
-        f"Use the representative operating condition as the "
-        f"starting point for {SUPPORTED_SCALE:.0f} L target-scale "
-        "validation. The operating window should be treated as "
-        "a decision-support range and experimentally validated "
-        "before production use."
+    st.markdown(
+        f"""
+        <div class="info-box">
+        <b>No active rule-based warning signals are detected
+        in the displayed observation.</b>
+        <br><br>
+        However, the classifier currently reports:
+        <b>{risk_probability * 100:.1f}% predicted deviation probability</b>
+        if risk_probability is not None else <b>N/A</b>.
+        <br><br>
+        This means the learned classifier is identifying a risk pattern
+        that is not currently accompanied by the rule-based warning
+        conditions. The prediction should therefore be investigated
+        rather than treated as biological certainty.
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
 
-st.markdown(
-    f"""
-    <div class="copilot-box">
-
-    <b>🤖 AI Copilot Recommendation</b>
-
-    <p>{recommendation}</p>
-
-    <p>
-    <b>Target scale:</b> {SUPPORTED_SCALE:.0f} L
-    </p>
-
-    <p>
-    <b>Process status:</b> {status}
-    </p>
-
-    <p>
-    <b>Readiness:</b> {float(overall_score):.2f} / 100
-    </p>
-
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-
 # ============================================================
-# WHY IS THE PROCESS AT RISK?
+# RISK GUARDIAN TREND
 # ============================================================
 
 st.markdown(
-    '<div class="section-title">🔎 Why is the Process at Risk?</div>',
+    '<div class="section-title">📈 Risk Guardian Trends</div>',
     unsafe_allow_html=True
 )
 
-if not guardian_current.empty:
+st.caption(
+    f"Failure/deviation probability across the simulated "
+    f"{dashboard_target_scale:.0f} L process stream."
+)
 
-    latest = guardian_current.iloc[0]
 
-    warning_columns = [
-        ("DO", "DO_warning"),
-        ("Oxygen Transfer", "oxygen_warning"),
-        ("Viability", "viability_warning"),
-        ("pH", "pH_warning"),
-        ("Mixing", "mixing_warning")
+trend_columns = [
+    c for c in [
+        "failure_probability",
+        "DO_percent",
+        "oxygen_margin"
     ]
+    if c in guardian_target.columns
+]
 
-    active_warnings = []
 
-    for label, column in warning_columns:
+if len(trend_columns) > 0:
 
-        if column in guardian_current.columns:
+    trend_df = guardian_target.copy()
 
-            value = latest[column]
+    if "timestamp" in trend_df.columns:
 
-            if bool(value):
-                active_warnings.append(label)
-
-    if active_warnings:
-
-        st.warning(
-            "**Active warning signals:** "
-            + ", ".join(active_warnings)
+        trend_df = trend_df.set_index(
+            "timestamp"
         )
 
-    else:
+    plot_df = trend_df[trend_columns].copy()
 
-        st.success(
-            "No active rule-based warning signals detected "
-            "in the current displayed Guardian observation."
+    if "failure_probability" in plot_df.columns:
+
+        plot_df["failure_probability"] = (
+            plot_df["failure_probability"] * 100
         )
+
+    st.line_chart(
+        plot_df,
+        use_container_width=True
+    )
 
 else:
 
     st.info(
-        "No current Guardian observation available."
+        "Risk trend data are not available in the exported package."
     )
 
 
 # ============================================================
-# DATA DISCLAIMER
+# 🤖 INTERACTIVE SCALEWISE AI COPILOT
+# ============================================================
+
+st.markdown(
+    '<div class="section-title">🤖 ScaleWise AI Copilot</div>',
+    unsafe_allow_html=True
+)
+
+st.caption(
+    "Ask questions about the current scale-up scenario. "
+    "The Copilot answers using the Model 1, Model 2 and Model 3 "
+    "outputs currently loaded into the dashboard."
+)
+
+
+# ============================================================
+# COPILOT RESPONSE ENGINE
+# ============================================================
+
+def copilot_response(question):
+
+    q = question.lower().strip()
+
+
+    # --------------------------------------------------------
+    # READINESS
+    # --------------------------------------------------------
+
+    if any(
+        word in q
+        for word in [
+            "readiness",
+            "score",
+            "validate",
+            "ready",
+            "status"
+        ]
+    ):
+
+        category_lines = []
+
+        for name, value in clean_categories.items():
+
+            category_lines.append(
+                f"- **{name}:** {value:.1f}/100"
+            )
+
+        return f"""
+### 🎯 Process Readiness
+
+The current **{dashboard_target_scale:.0f} L** demonstration scenario
+has an overall readiness score of **{dashboard_score:.2f}/100**.
+
+The current process status is:
+
+**{dashboard_status}**
+
+Readiness categories:
+
+{chr(10).join(category_lines)}
+
+The system is therefore treating this scenario as a **validation
+candidate**, rather than a validated production condition.
+
+The result is based on the prototype's synthetic/demo dataset and
+should be experimentally validated before operational use.
+"""
+
+
+    # --------------------------------------------------------
+    # OPERATING WINDOW
+    # --------------------------------------------------------
+
+    if any(
+        word in q
+        for word in [
+            "operating window",
+            "operating condition",
+            "recommended condition",
+            "recommend",
+            "rpm",
+            "agitation",
+            "aeration"
+        ]
+    ):
+
+        return f"""
+### ⚙️ Recommended Operating Region
+
+For the current **{dashboard_target_scale:.0f} L** demonstration
+scenario, the model-derived operating region is:
+
+**Agitation**
+- Minimum: **152.44 RPM**
+- Representative: **217.36 RPM**
+- Maximum: **239.00 RPM**
+
+**Aeration**
+- Minimum: **0.223 vvm**
+- Representative: **0.487 vvm**
+- Maximum: **0.575 vvm**
+
+**DO**
+- Minimum: **44.87%**
+- Representative: **53.63%**
+- Maximum: **53.63%**
+
+Representative condition:
+
+- Temperature: **{fmt(rep_temperature, 2)} °C**
+- pH: **{fmt(rep_ph, 2)}**
+- Feed rate: **{fmt(rep_feed, 3)} mL/h**
+
+These values are **model-derived starting conditions for validation**,
+not validated production setpoints.
+"""
+
+
+    # --------------------------------------------------------
+    # BIOLOGICAL PERFORMANCE
+    # --------------------------------------------------------
+
+    if any(
+        word in q
+        for word in [
+            "biology",
+            "biological",
+            "vcd",
+            "viability",
+            "growth",
+            "lactate",
+            "cells"
+        ]
+    ):
+
+        return f"""
+### 🧫 Predicted Biological Performance
+
+For the representative target-scale condition:
+
+- **VCD:** {fmt(rep_vcd, 3)} million cells/mL
+- **Viability:** {fmt(rep_viability, 2)}%
+- **Growth rate:** {fmt(rep_growth, 4)} /h
+- **Lactate:** {fmt(rep_lactate, 3)} g/L
+
+These are Model 1 predictions. They should be compared with
+experimental observations during target-scale validation.
+"""
+
+
+    # --------------------------------------------------------
+    # ENGINEERING
+    # --------------------------------------------------------
+
+    if any(
+        word in q
+        for word in [
+            "engineering",
+            "physics",
+            "hydrodynamic",
+            "mixing",
+            "kla",
+            "oxygen transfer",
+            "oxygen",
+            "reynolds",
+            "tip speed",
+            "p/v"
+        ]
+    ):
+
+        return f"""
+### 🔬 Scale-Up Engineering Assessment
+
+The representative target-scale condition has:
+
+- **P/V:** {fmt(rep_pv, 4)} W/L
+- **kLa:** {fmt(rep_kla, 3)} /h
+- **Mixing time:** {fmt(rep_mixing, 1)} s
+- **Tip speed:** {fmt(rep_tip, 3)} m/s
+- **Reynolds number:** {fmt(rep_re, 0)}
+- **DO:** {fmt(rep_do, 2)}%
+
+These indicators describe the physical/hydrodynamic environment
+associated with the target-scale process.
+
+The hydrodynamic category is currently **{
+    clean_categories.get(
+        "Hydrodynamic Condition",
+        36.7
+    )
+:.1f}/100**, which is one of the main areas requiring validation.
+"""
+
+
+    # --------------------------------------------------------
+    # RISK
+    # --------------------------------------------------------
+
+    if any(
+        word in q
+        for word in [
+            "risk",
+            "danger",
+            "failure",
+            "deviation",
+            "warning",
+            "guardian",
+            "critical"
+        ]
+    ):
+
+        probability_text = (
+            f"{risk_probability * 100:.1f}%"
+            if risk_probability is not None
+            else "N/A"
+        )
+
+        confidence_text = (
+            f"{risk_confidence:.1f}%"
+            if risk_confidence is not None
+            else "N/A"
+        )
+
+        return f"""
+### 🛡️ Risk Guardian Assessment
+
+**Predicted deviation probability:** {probability_text}
+
+**Risk level:** {risk_level}
+
+**Classification confidence:** {confidence_text}
+
+**Rule-based warning signals:** {warning_count}
+
+**Risk explanation**
+
+{risk_reason}
+
+**Recommended action**
+
+{risk_action}
+
+Important: classification confidence indicates confidence in the
+classifier's output. It should **not** be interpreted as biological
+certainty.
+"""
+
+
+    # --------------------------------------------------------
+    # NEXT STEP
+    # --------------------------------------------------------
+
+    if any(
+        word in q
+        for word in [
+            "what should i do",
+            "what next",
+            "next step",
+            "action",
+            "proceed",
+            "validation",
+            "validate next"
+        ]
+    ):
+
+        return f"""
+### 🧭 ScaleWise Recommended Next Step
+
+For the current **{dashboard_target_scale:.0f} L** scenario:
+
+1. Use the representative operating condition as the starting point
+   for target-scale validation.
+2. Verify oxygen-transfer behaviour experimentally.
+3. Evaluate hydrodynamic/mixing behaviour.
+4. Monitor DO, oxygen margin, viability and process trends.
+5. Compare observed biology with Model 1 predictions.
+6. Reassess Risk Guardian behaviour during the validation run.
+
+Current status:
+
+**{dashboard_status}**
+
+The prototype should be used as a **decision-support system for
+validation**, not as an autonomous production controller.
+"""
+
+
+    # --------------------------------------------------------
+    # GENERAL
+    # --------------------------------------------------------
+
+    return f"""
+### 🤖 ScaleWise Copilot
+
+I can help interpret the current **{dashboard_target_scale:.0f} L**
+scale-up scenario.
+
+Try asking:
+
+- **Why is the readiness score {dashboard_score:.2f}?**
+- **What operating window do you recommend?**
+- **What biological performance is predicted?**
+- **What are the important engineering indicators?**
+- **Why is the process at risk?**
+- **What should we validate next?**
+"""
+
+
+# ============================================================
+# COPILOT QUICK QUESTIONS
+# ============================================================
+
+st.markdown(
+    '<div class="copilot-box">'
+    '<div class="copilot-header">💬 Ask ScaleWise</div>'
+    '<br>'
+    'Use the chat box below or select a suggested question.'
+    '</div>',
+    unsafe_allow_html=True
+)
+
+
+q1, q2, q3 = st.columns(3)
+
+
+with q1:
+
+    if st.button(
+        "🎯 Why is readiness VALIDATE?",
+        use_container_width=True
+    ):
+
+        st.session_state["copilot_question"] = (
+            "Why is the readiness score VALIDATE?"
+        )
+
+
+with q2:
+
+    if st.button(
+        "⚙️ What operating window is recommended?",
+        use_container_width=True
+    ):
+
+        st.session_state["copilot_question"] = (
+            "What operating window is recommended?"
+        )
+
+
+with q3:
+
+    if st.button(
+        "🛡️ Why is the process at risk?",
+        use_container_width=True
+    ):
+
+        st.session_state["copilot_question"] = (
+            "Why is the process at risk?"
+        )
+
+
+q4, q5, q6 = st.columns(3)
+
+
+with q4:
+
+    if st.button(
+        "🧫 What biology is predicted?",
+        use_container_width=True
+    ):
+
+        st.session_state["copilot_question"] = (
+            "What biological performance is predicted?"
+        )
+
+
+with q5:
+
+    if st.button(
+        "🔬 Explain the engineering indicators",
+        use_container_width=True
+    ):
+
+        st.session_state["copilot_question"] = (
+            "Explain the engineering indicators."
+        )
+
+
+with q6:
+
+    if st.button(
+        "🧭 What should we validate next?",
+        use_container_width=True
+    ):
+
+        st.session_state["copilot_question"] = (
+            "What should we validate next?"
+        )
+
+
+# ============================================================
+# CHAT HISTORY
+# ============================================================
+
+if "copilot_messages" not in st.session_state:
+
+    st.session_state.copilot_messages = [
+        {
+            "role": "assistant",
+            "content": (
+                "Hello! 👋 I'm **ScaleWise Copilot**.\n\n"
+                "I can explain the current readiness score, "
+                "operating window, biological predictions, "
+                "engineering indicators and Risk Guardian."
+            )
+        }
+    ]
+
+
+# ============================================================
+# QUICK QUESTION RESPONSE
+# ============================================================
+
+if "copilot_question" in st.session_state:
+
+    question = st.session_state.pop(
+        "copilot_question"
+    )
+
+    answer = copilot_response(
+        question
+    )
+
+    st.session_state.copilot_messages.append(
+        {
+            "role": "user",
+            "content": question
+        }
+    )
+
+    st.session_state.copilot_messages.append(
+        {
+            "role": "assistant",
+            "content": answer
+        }
+    )
+
+
+# ============================================================
+# DISPLAY CHAT HISTORY
+# ============================================================
+
+for message in st.session_state.copilot_messages:
+
+    with st.chat_message(
+        message["role"]
+    ):
+
+        st.markdown(
+            message["content"]
+        )
+
+
+# ============================================================
+# CHAT INPUT
+# ============================================================
+
+user_question = st.chat_input(
+    "Ask ScaleWise about this scale-up scenario..."
+)
+
+
+if user_question:
+
+    st.session_state.copilot_messages.append(
+        {
+            "role": "user",
+            "content": user_question
+        }
+    )
+
+    answer = copilot_response(
+        user_question
+    )
+
+    st.session_state.copilot_messages.append(
+        {
+            "role": "assistant",
+            "content": answer
+        }
+    )
+
+    st.rerun()
+
+
+# ============================================================
+# COPILOT DATA TRANSPARENCY
+# ============================================================
+
+with st.expander(
+    "🔍 View data used by ScaleWise Copilot"
+):
+
+    st.write(
+        "The Copilot is grounded in the current dashboard outputs."
+    )
+
+    st.json({
+
+        "target_scale_L": dashboard_target_scale,
+
+        "readiness_score": dashboard_score,
+
+        "status": dashboard_status,
+
+        "readiness_categories": clean_categories,
+
+        "representative_condition": {
+
+            "rpm": number(rep_rpm),
+
+            "aeration_vvm": number(rep_aeration),
+
+            "DO_percent": number(rep_do),
+
+            "temperature_C": number(rep_temperature),
+
+            "pH": number(rep_ph),
+
+            "feed_rate_mL_h": number(rep_feed)
+        },
+
+        "predicted_biology": {
+
+            "VCD_million_cells_mL":
+                number(rep_vcd),
+
+            "viability_percent":
+                number(rep_viability),
+
+            "growth_rate_per_h":
+                number(rep_growth),
+
+            "lactate_g_L":
+                number(rep_lactate)
+        },
+
+        "risk_guardian": {
+
+            "failure_probability":
+                number(risk_probability),
+
+            "risk_level":
+                risk_level,
+
+            "warning_signal_count":
+                warning_count
+        }
+
+    })
+
+
+# ============================================================
+# FOOTER
 # ============================================================
 
 st.markdown("---")
