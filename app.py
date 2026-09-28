@@ -1,13 +1,121 @@
 import streamlit as st
+import pandas as pd
+import json
+import os
 
 # ============================================================
 # PAGE CONFIGURATION
 # ============================================================
 
 st.set_page_config(
-    page_title="AI Copilot for Bioprocess Scale-Up",
+    page_title="ScaleWise | AI Bioprocess Copilot",
     page_icon="🧬",
     layout="wide"
+)
+
+# ============================================================
+# LOAD DATA
+# ============================================================
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def load_json(filename):
+    path = os.path.join(BASE_DIR, filename)
+
+    if not os.path.exists(path):
+        return {}
+
+    with open(path, "r") as f:
+        return json.load(f)
+
+
+def load_csv(filename):
+    path = os.path.join(BASE_DIR, filename)
+
+    if not os.path.exists(path):
+        return pd.DataFrame()
+
+    return pd.read_csv(path)
+
+
+dashboard_data = load_json(
+    "ai_copilot_dashboard_data.json"
+)
+
+operating_window = load_csv(
+    "model2_operating_window.csv"
+)
+
+representative_condition = load_csv(
+    "model2_representative_condition.csv"
+)
+
+guardian_df = load_csv(
+    "model3_guardian_data.csv"
+)
+
+threshold_data = load_json(
+    "model3_alert_threshold.json"
+)
+
+# ============================================================
+# EXTRACT DASHBOARD DATA
+# ============================================================
+
+readiness = dashboard_data.get(
+    "readiness",
+    {}
+)
+
+target_scale_data = dashboard_data.get(
+    "target_scale",
+    {}
+)
+
+biology = dashboard_data.get(
+    "biology",
+    {}
+)
+
+engineering = dashboard_data.get(
+    "engineering",
+    {}
+)
+
+risk_guardian = dashboard_data.get(
+    "risk_guardian",
+    {}
+)
+
+ai_recommendation = dashboard_data.get(
+    "ai_recommendation",
+    {}
+)
+
+overall_score = readiness.get(
+    "overall_score",
+    0
+)
+
+status = readiness.get(
+    "status",
+    "VALIDATE"
+)
+
+categories = readiness.get(
+    "categories",
+    {}
+)
+
+target_scale = target_scale_data.get(
+    "target_scale_L",
+    20
+)
+
+representative = target_scale_data.get(
+    "representative_condition",
+    {}
 )
 
 # ============================================================
@@ -18,9 +126,9 @@ st.markdown("""
 <style>
 
 .main-title {
-    font-size: 32px;
-    font-weight: 700;
-    margin-bottom: 5px;
+    font-size: 34px;
+    font-weight: 800;
+    margin-bottom: 4px;
 }
 
 .subtitle {
@@ -30,47 +138,43 @@ st.markdown("""
 }
 
 .section-title {
-    font-size: 22px;
+    font-size: 23px;
     font-weight: 700;
-    margin-top: 25px;
+    margin-top: 28px;
     margin-bottom: 15px;
 }
 
-.card {
-    padding: 18px;
+.copilot-box {
+    padding: 22px;
+    border-radius: 14px;
+    background-color: #f5f7fa;
+    border-left: 5px solid #4c78a8;
+    margin-bottom: 15px;
+}
+
+.status-box {
+    padding: 14px;
     border-radius: 12px;
-    border: 1px solid #ddd;
-    background-color: #ffffff;
-    margin-bottom: 15px;
+    background-color: #f5f7fa;
+    text-align: center;
 }
 
-.metric-label {
+.small-note {
     font-size: 13px;
     color: #666;
 }
 
-.metric-value {
-    font-size: 25px;
-    font-weight: 700;
-}
-
-.copilot-box {
-    padding: 20px;
-    border-radius: 12px;
-    background-color: #f5f7fa;
-    border-left: 5px solid #4c78a8;
-}
-
 </style>
 """, unsafe_allow_html=True)
-
 
 # ============================================================
 # HEADER
 # ============================================================
 
 st.markdown(
-    '<div class="main-title">🧬 AI Copilot for Scalable Cell-Culture Bioprocess Design</div>',
+    '<div class="main-title">'
+    '🧬 ScaleWise — AI Copilot for Scalable Cell-Culture Bioprocess Design'
+    '</div>',
     unsafe_allow_html=True
 )
 
@@ -81,18 +185,17 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-
 # ============================================================
 # SIDEBAR
 # ============================================================
 
 st.sidebar.header("⚙️ Process Configuration")
 
-target_scale = st.sidebar.number_input(
+selected_scale = st.sidebar.number_input(
     "Target Scale (L)",
     min_value=1.0,
     max_value=10000.0,
-    value=20.0,
+    value=float(target_scale),
     step=1.0
 )
 
@@ -105,11 +208,14 @@ process_stage = st.sidebar.selectbox(
     ]
 )
 
-st.sidebar.warning(
-    "Prototype dashboard using synthetic/demo data. "
-    "Process limits require experimental validation."
+st.sidebar.info(
+    f"Dashboard target scale: {target_scale:.0f} L"
 )
 
+st.sidebar.warning(
+    "Prototype dashboard using synthetic/demo data. "
+    "Process limits and recommendations require experimental validation."
+)
 
 # ============================================================
 # PROCESS READINESS
@@ -123,14 +229,22 @@ st.markdown(
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    st.metric("Target Scale", f"{target_scale:.0f} L")
+    st.metric(
+        "Target Scale",
+        f"{selected_scale:.0f} L"
+    )
 
 with col2:
-    st.metric("Overall Readiness", "-- / 100")
+    st.metric(
+        "Overall Readiness",
+        f"{overall_score:.2f} / 100"
+    )
 
 with col3:
-    st.metric("Status", "READY FOR VALIDATION")
-
+    st.metric(
+        "Status",
+        status
+    )
 
 # ============================================================
 # READINESS CATEGORIES
@@ -141,23 +255,35 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-c1, c2, c3, c4, c5 = st.columns(5)
+category_names = [
+    ("Biological Condition", "Biological Condition"),
+    ("Oxygen Transfer", "Oxygen Transfer"),
+    ("Hydrodynamic Condition", "Hydrodynamic Condition"),
+    ("Process Control", "Process Control"),
+    ("Model Reliability", "Model Reliability")
+]
 
-with c1:
-    st.metric("Biological Condition", "--")
+cols = st.columns(5)
 
-with c2:
-    st.metric("Oxygen Transfer", "--")
+for col, (display_name, key) in zip(
+    cols,
+    category_names
+):
 
-with c3:
-    st.metric("Hydrodynamic", "--")
+    value = categories.get(key, "--")
 
-with c4:
-    st.metric("Process Control", "--")
+    with col:
 
-with c5:
-    st.metric("Model Reliability", "--")
-
+        if isinstance(value, (int, float)):
+            st.metric(
+                display_name,
+                f"{value:.1f} / 100"
+            )
+        else:
+            st.metric(
+                display_name,
+                str(value)
+            )
 
 # ============================================================
 # OPERATING WINDOW
@@ -168,26 +294,61 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-operating_window = {
-    "Parameter": [
-        "Agitation (RPM)",
-        "Aeration (vvm)",
-        "DO (%)",
-        "Temperature (°C)",
-        "pH",
-        "Feed Rate (mL/h)"
-    ],
-    "Minimum": ["--"] * 6,
-    "Representative": ["--"] * 6,
-    "Maximum": ["--"] * 6
-}
+if not operating_window.empty:
 
-st.dataframe(
-    operating_window,
-    use_container_width=True,
-    hide_index=True
+    st.dataframe(
+        operating_window,
+        use_container_width=True,
+        hide_index=True
+    )
+
+else:
+
+    st.warning(
+        "Operating-window data not available."
+    )
+
+# ============================================================
+# REPRESENTATIVE CONDITION
+# ============================================================
+
+st.markdown(
+    '<div class="section-title">📍 Representative Target-Scale Condition</div>',
+    unsafe_allow_html=True
 )
 
+if representative:
+
+    rep_items = []
+
+    for key, value in representative.items():
+
+        if pd.isna(value):
+            continue
+
+        if isinstance(value, (int, float)):
+
+            rep_items.append(
+                (
+                    key,
+                    f"{value:.3f}"
+                )
+            )
+
+    rep_cols = st.columns(
+        min(4, len(rep_items))
+    )
+
+    for col, (key, value) in zip(
+        rep_cols,
+        rep_items
+    ):
+
+        with col:
+            st.metric(
+                key.replace("_", " "),
+                value
+            )
 
 # ============================================================
 # BIOLOGICAL PERFORMANCE
@@ -201,17 +362,28 @@ st.markdown(
 b1, b2, b3, b4 = st.columns(4)
 
 with b1:
-    st.metric("VCD", "--")
+    st.metric(
+        "VCD",
+        f"{biology.get('VCD_million_cells_mL', 0):.3f} M cells/mL"
+    )
 
 with b2:
-    st.metric("Viability", "--")
+    st.metric(
+        "Viability",
+        f"{biology.get('viability_percent', 0):.2f}%"
+    )
 
 with b3:
-    st.metric("Growth Rate", "--")
+    st.metric(
+        "Growth Rate",
+        f"{biology.get('growth_rate_per_h', 0):.4f} /h"
+    )
 
 with b4:
-    st.metric("Lactate", "--")
-
+    st.metric(
+        "Lactate",
+        f"{biology.get('lactate_g_L', 0):.3f} g/L"
+    )
 
 # ============================================================
 # ENGINEERING INDICATORS
@@ -225,25 +397,48 @@ st.markdown(
 e1, e2, e3 = st.columns(3)
 
 with e1:
-    st.metric("P/V", "--")
+    st.metric(
+        "P/V",
+        f"{engineering.get('PV_W_L', 0):.3f} W/L"
+    )
 
 with e2:
-    st.metric("kLa", "--")
+    st.metric(
+        "kLa",
+        f"{engineering.get('kLa_per_h', 0):.3f} /h"
+    )
 
 with e3:
-    st.metric("Mixing Time", "--")
+    st.metric(
+        "Mixing Time",
+        f"{engineering.get('mixing_time_s', 0):.1f} s"
+    )
 
 e4, e5, e6 = st.columns(3)
 
 with e4:
-    st.metric("Tip Speed", "--")
+    st.metric(
+        "Tip Speed",
+        f"{engineering.get('tip_speed_m_s', 0):.3f} m/s"
+    )
 
 with e5:
-    st.metric("Reynolds Number", "--")
+
+    re_value = representative.get(
+        "reynolds_number",
+        0
+    )
+
+    st.metric(
+        "Reynolds Number",
+        f"{float(re_value):,.0f}"
+    )
 
 with e6:
-    st.metric("DO", "--")
-
+    st.metric(
+        "DO",
+        f"{engineering.get('DO_percent', 0):.2f}%"
+    )
 
 # ============================================================
 # REAL-TIME RISK GUARDIAN
@@ -254,23 +449,146 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-r1, r2, r3 = st.columns(3)
+if not guardian_df.empty:
 
-with r1:
-    st.metric("Deviation Probability", "--")
+    latest = guardian_df.iloc[-1]
 
-with r2:
-    st.metric("Risk Level", "STABLE")
+    probability = float(
+        latest.get(
+            "failure_probability",
+            0
+        )
+    )
 
-with r3:
-    st.metric("Model Confidence", "--")
+    risk_level = str(
+        latest.get(
+            "risk_level",
+            "UNKNOWN"
+        )
+    )
 
+    confidence = float(
+        latest.get(
+            "model_confidence",
+            0
+        )
+    )
 
-st.info(
-    "Risk Guardian continuously evaluates process conditions, "
-    "trend signals and scale-up indicators to identify developing deviations."
-)
+    warning_count = int(
+        latest.get(
+            "warning_signal_count",
+            0
+        )
+    )
 
+    r1, r2, r3, r4 = st.columns(4)
+
+    with r1:
+        st.metric(
+            "Deviation Probability",
+            f"{probability * 100:.1f}%"
+        )
+
+    with r2:
+        st.metric(
+            "Risk Level",
+            risk_level
+        )
+
+    with r3:
+        st.metric(
+            "Model Confidence",
+            f"{confidence:.1f}%"
+        )
+
+    with r4:
+        st.metric(
+            "Warning Signals",
+            warning_count
+        )
+
+    # --------------------------------------------------------
+    # RISK REASON
+    # --------------------------------------------------------
+
+    risk_reason = str(
+        latest.get(
+            "risk_reason",
+            "No active risk driver identified."
+        )
+    )
+
+    recommended_action = str(
+        latest.get(
+            "recommended_action",
+            "Continue monitoring."
+        )
+    )
+
+    st.warning(
+        f"⚠️ **Risk signal:** {risk_reason}"
+    )
+
+    st.info(
+        f"🔧 **Recommended action:** {recommended_action}"
+    )
+
+    st.caption(
+        "Model confidence represents classification confidence "
+        "and should not be interpreted as biological certainty."
+    )
+
+else:
+
+    st.info(
+        "Risk Guardian data not available."
+    )
+
+# ============================================================
+# RISK TREND
+# ============================================================
+
+if not guardian_df.empty:
+
+    st.markdown(
+        '<div class="section-title">📈 Risk Guardian Trend</div>',
+        unsafe_allow_html=True
+    )
+
+    trend_df = guardian_df.copy()
+
+    if "timestamp" in trend_df.columns:
+
+        trend_df["timestamp"] = pd.to_datetime(
+            trend_df["timestamp"],
+            errors="coerce"
+        )
+
+        trend_df = trend_df.dropna(
+            subset=["timestamp"]
+        )
+
+        if not trend_df.empty:
+
+            trend_df = trend_df.set_index(
+                "timestamp"
+            )
+
+            chart_columns = [
+                c for c in [
+                    "failure_probability",
+                    "DO_percent",
+                    "oxygen_margin"
+                ]
+                if c in trend_df.columns
+            ]
+
+            if chart_columns:
+
+                st.line_chart(
+                    trend_df[chart_columns],
+                    use_container_width=True
+                )
 
 # ============================================================
 # AI COPILOT ASSESSMENT
@@ -281,25 +599,33 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.markdown("""
-<div class="copilot-box">
+recommendation = ai_recommendation.get(
+    "recommendation",
+    "Use the recommended operating region as a starting point for validation."
+)
 
-<b>AI Copilot Recommendation</b>
+st.markdown(
+    f"""
+    <div class="copilot-box">
 
-<br><br>
+    <b>AI Copilot Recommendation</b>
 
-The recommended operating region will be generated from the
-scale-up optimization and process-readiness analysis.
+    <br><br>
 
-<br><br>
+    {recommendation}
 
-The system will identify acceptable operating conditions,
-predicted biological performance, engineering constraints,
-and potential scale-up risks.
+    <br><br>
 
-</div>
-""", unsafe_allow_html=True)
+    <b>Target scale:</b> {target_scale:.0f} L
 
+    <br><br>
+
+    <b>Process status:</b> {status}
+
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 # ============================================================
 # RISK EXPLANATION
@@ -310,19 +636,53 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.write(
-    "Risk-driver explanations will appear here after connecting "
-    "the Model 3 Risk Guardian outputs."
-)
+if not guardian_df.empty:
 
+    latest = guardian_df.iloc[-1]
+
+    warning_columns = [
+        ("DO", "DO_warning"),
+        ("Oxygen Transfer", "oxygen_warning"),
+        ("Viability", "viability_warning"),
+        ("pH", "pH_warning"),
+        ("Mixing", "mixing_warning")
+    ]
+
+    active_warnings = []
+
+    for label, column in warning_columns:
+
+        if column in guardian_df.columns:
+
+            if bool(latest[column]):
+                active_warnings.append(label)
+
+    if active_warnings:
+
+        st.write(
+            "**Active risk indicators:** "
+            + ", ".join(active_warnings)
+        )
+
+    else:
+
+        st.success(
+            "No active rule-based warning signals detected "
+            "in the displayed Guardian observation."
+        )
 
 # ============================================================
-# FOOTER
+# DATA DISCLAIMER
 # ============================================================
 
 st.markdown("---")
 
 st.caption(
-    "AI Copilot for Scalable Cell-Culture Bioprocess Design | "
-    "Prototype / Synthetic Data Demonstration"
+    "ScaleWise | AI Copilot for Scalable Cell-Culture Bioprocess Design"
+)
+
+st.caption(
+    "Prototype / synthetic-data demonstration. "
+    "Operating limits, predictions and risk signals require "
+    "experimental validation before production use."
 )
