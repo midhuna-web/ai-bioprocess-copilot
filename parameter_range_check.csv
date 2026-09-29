@@ -1,0 +1,15 @@
+parameter,target_value,observed_min,observed_max,status,distance_percent
+rpm,220.0,70.0,320.0,IN RANGE,0.0
+aeration_vvm,0.5,0.01,0.14,OUT OF RANGE,257.143
+temperature_C,37.0,20.0,37.5,IN RANGE,0.0
+pH,7.0,7.0,7.35,IN RANGE,0.0
+DO_percent,50.0,25.0,55.0,IN RANGE,0.0
+PV_V_L,0.9832584511365248,0.75,0.9,OUT OF RANGE,9.251
+kLa_per_h,204.8895599633784,18.0,82.45,OUT OF RANGE,148.502
+mixing_time_s,12.874310533709773,5.0,48.77,IN RANGE,0.0
+OTR_mmol_L_h,468.526410678568,22.51,182.17,OUT OF RANGE,157.192
+tank_diameter_mm,,111.55,547.71,MISSING,
+liquid_height_mm,,100.0,607.85,MISSING,
+impeller_diameter_mm,,45.0,210.0,MISSING,
+Reynolds_number,64311.03614457832,3497.0,202098.0,IN RANGE,0.0
+tip_speed_m_s,1.5962118113624375,0.23,3.42,IN RANGE,0.0
