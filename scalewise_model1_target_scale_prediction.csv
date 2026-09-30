@@ -1,0 +1,2 @@
+target_scale_L,cell_line,immobilization,working_time_h,rpm,aeration_vvm,temperature_C,pH,DO_percent,initial_VCD_million_cells_mL,feed_rate_mL_h,PV_V_L,kLa_per_h,mixing_time_s,OTR_mmol_L_h,Reynolds_number,tip_speed_m_s,Predicted_VCD_million_cells_mL,Predicted_growth_rate_per_h,Predicted_lactate_g_L,Predicted_osmolality_mOsm_kg
+50,Chicken fibroblast,Immobilised,24,220,0.5,37,7.0,50,0.5,0.5,0.9832584511365249,204.8895599633784,12.874310533709773,468.52641067856797,64311.03614457832,1.5962118113624377,2.4377899303794277,0.032723333333333327,0.7891390607913444,302.81497973482

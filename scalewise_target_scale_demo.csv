@@ -1,0 +1,2 @@
+target_scale_L,rpm,aeration_vvm,DO_percent,temperature_C,pH,tank_diameter_m,liquid_height_m,impeller_diameter_m,PV_V_L,kLa_per_h,mixing_time_s,OTR_mmol_L_h,Reynolds_number,tip_speed_m_s,reference_rpm,reference_aeration_vvm,reference_observations
+50,220,0.5,50,37,7.0,0.359205,0.38243999999999995,0.13857,0.9832584511365249,204.8895599633784,12.874310533709773,468.52641067856797,64311.03614457832,1.5962118113624377,207.5,0.1195,50

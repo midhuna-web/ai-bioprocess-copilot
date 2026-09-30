@@ -1,0 +1,2 @@
+target_scale_L,parameters_checked,parameters_in_range,parameters_out_of_range,coverage_percent,overall_status,extrapolation_warning
+50.0,11,7,4,63.64,RED — SIGNIFICANT EXTRAPOLATION,True
