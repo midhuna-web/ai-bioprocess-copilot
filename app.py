@@ -1,1657 +1,1301 @@
-# ============================================================
-# SCALEWISE AI COPILOT
-# STEP 6A v2 — FUNCTIONAL DASHBOARD
-# ============================================================
 
+import os
+import math
 import json
 from pathlib import Path
 
-import joblib
 import numpy as np
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, IsolationForest
+from sklearn.model_selection import GroupShuffleSplit
+from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+
 
 # ============================================================
-# PAGE CONFIGURATION
+# ScaleWise — Steps 5A onward
 # ============================================================
+# Input workbook:
+#   Final Data for Hackathon.xlsx
+#
+# This app contains:
+#   5A  Physics / scale-up engine
+#   5B  Target-scale interpolation
+#   5C  Model-1 predictions
+#   5D  Process risk scorecard + scale-up risk assessment
+#   5E  Interactive AI Copilot
+#
+# IMPORTANT:
+# The supplied workbook contains failure_event = 0 for every row.
+# Therefore no supervised failure classifier is trained. The
+# "failure risk" shown by this app is an auditable physics/data-
+# coverage/anomaly risk score, NOT a historical failure probability.
+# ============================================================
+
 
 st.set_page_config(
-    page_title="ScaleWise AI Copilot",
+    page_title="ScaleWise — Bioprocess Scale-Up Copilot",
     page_icon="🧬",
-    layout="wide"
+    layout="wide",
 )
 
 
-# ============================================================
-# PATHS
-# ============================================================
-
-ROOT = Path(__file__).resolve().parent
-ARTIFACT_DIR = ROOT / "model_artifacts"
-
-
-# ============================================================
-# TITLE
-# ============================================================
-
-st.title("🧬 ScaleWise AI Copilot")
-
-st.caption(
-    "AI Copilot for scalable cell-culture bioprocess design"
+# -----------------------------
+# Configuration
+# -----------------------------
+DATA_FILE = Path(
+    os.getenv(
+        "SCALewise_DATA_FILE",
+        Path(__file__).with_name("Final Data for Hackathon.xlsx")
+    )
 )
 
-st.info(
-    "Prototype demonstration using synthetic/demo data. "
-    "Predictions, risk assessments and operating recommendations "
-    "require experimental validation."
-)
+MODEL1_TARGETS = [
+    "VCD_million_cells_mL",
+    "viability_percent",
+    "growth_rate_per_h",
+    "glucose_g_L",
+    "lactate_g_L",
+]
 
-
-# ============================================================
-# LOAD ARTIFACTS
-# ============================================================
-
-@st.cache_resource
-def load_models():
-
-    return joblib.load(
-        ARTIFACT_DIR / "model1_final_models.joblib"
-    )
-
-
-@st.cache_resource
-def load_preprocessor():
-
-    return joblib.load(
-        ARTIFACT_DIR / "preprocessor.joblib"
-    )
-
-
-@st.cache_resource
-def load_metadata():
-
-    path = ARTIFACT_DIR / "model1_metadata.joblib"
-
-    if path.exists():
-        return joblib.load(path)
-
-    return {}
-
-
-@st.cache_resource
-def load_schema():
-
-    path = ARTIFACT_DIR / "feature_schema.joblib"
-
-    if path.exists():
-        return joblib.load(path)
-
-    return {}
-
-
-@st.cache_data
-def load_physics():
-
-    return pd.read_csv(
-        ARTIFACT_DIR / "physics_engine.csv"
-    )
-
-
-@st.cache_data
-def load_model1_data():
-
-    return pd.read_csv(
-        ARTIFACT_DIR / "model1_clean.csv"
-    )
-
-
-# ============================================================
-# LOAD
-# ============================================================
-
-try:
-
-    model1_models = load_models()
-    preprocessor = load_preprocessor()
-    metadata = load_metadata()
-    feature_schema = load_schema()
-
-    physics_df = load_physics()
-    model1_df = load_model1_data()
-
-except Exception as e:
-
-    st.error("ScaleWise artifacts could not be loaded.")
-
-    st.code(str(e))
-
-    st.stop()
-
-
-# ============================================================
-# DETERMINE AVAILABLE CATEGORIES
-# ============================================================
-
-def find_column_values(df, column, fallback):
-
-    if column in df.columns:
-
-        values = (
-            df[column]
-            .dropna()
-            .astype(str)
-            .unique()
-            .tolist()
-        )
-
-        if values:
-            return sorted(values)
-
-    return fallback
-
-
-cell_lines = find_column_values(
-    model1_df,
+MODEL1_PROCESS_FEATURES = [
     "cell_line",
-    [
-        "Chicken fibroblast",
-        "Trout",
-        "Snow trout"
-    ]
-)
-
-
-immobilization_values = find_column_values(
-    model1_df,
-    "immobilization",
-    [
-        "Not immobilized",
-        "Immobilized"
-    ]
-)
-
-
-impeller_types = find_column_values(
-    model1_df,
-    "impeller_type",
-    [
-        "Rushton",
-        "Marine",
-        "Pitched blade"
-    ]
-)
-
-
-# ============================================================
-# SIDEBAR — USER INPUTS
-# ============================================================
-
-st.sidebar.header("⚙️ Process Configuration")
-
-st.sidebar.subheader("Biological Parameters")
-
-
-cell_line = st.sidebar.selectbox(
-    "Cell line",
-    cell_lines
-)
-
-
-immobilization = st.sidebar.selectbox(
-    "Immobilization",
-    immobilization_values
-)
-
-
-target_scale = st.sidebar.selectbox(
-    "Target scale (L)",
-    sorted(
-        physics_df["scale_L"]
-        .dropna()
-        .unique()
-        .tolist()
-    )
-)
-
-
-st.sidebar.subheader("Process Parameters")
-
-
-working_time = st.sidebar.number_input(
-    "Working time (h)",
-    min_value=0.1,
-    value=24.0,
-    step=1.0
-)
-
-
-rpm = st.sidebar.number_input(
-    "Agitation speed (rpm)",
-    min_value=1.0,
-    value=220.0,
-    step=5.0
-)
-
-
-aeration = st.sidebar.number_input(
-    "Aeration (vvm)",
-    min_value=0.0,
-    value=0.06,
-    step=0.01,
-    format="%.3f"
-)
-
-
-temperature = st.sidebar.number_input(
-    "Temperature (°C)",
-    value=37.0,
-    step=0.5
-)
-
-
-pH = st.sidebar.number_input(
+    "scale_L",
+    "batch_age_h",
+    "rpm",
+    "aeration_vvm",
+    "temperature_C",
     "pH",
-    value=7.0,
-    step=0.05,
-    format="%.2f"
-)
+    "DO_percent",
+    "initial_VCD_million_cells_mL",
+    "feed_rate_mL_h",
+]
+
+MODEL1_PHYSICS_FEATURES = [
+    "PV_W_L",
+    "kLa_per_h",
+    "mixing_time_s",
+    "OTR_mmol_L_h",
+    "tank_diameter_m",
+    "tank_height_m",
+    "impeller_diameter_m",
+    "reynolds_number",
+    "tip_speed_m_s",
+    "impeller_type",
+]
+
+MODEL1_FEATURES = MODEL1_PROCESS_FEATURES + MODEL1_PHYSICS_FEATURES
+
+PHYSICS_COLUMNS = [
+    "scale_L",
+    "rpm",
+    "aeration_vvm",
+    "temperature_C",
+    "pH",
+    "DO_percent",
+    "feed_rate_mL_h",
+    "tank_diameter_m",
+    "tank_height_m",
+    "impeller_diameter_m",
+    "impeller_type",
+    "PV_W_L",
+    "kLa_per_h",
+    "mixing_time_s",
+    "OTR_mmol_L_h",
+    "reynolds_number",
+    "tip_speed_m_s",
+]
+
+# Conservative operational bounds for the UI.
+# Continuous ranges are also checked against the actual workbook.
+INPUT_COLUMNS = [
+    "rpm",
+    "aeration_vvm",
+    "temperature_C",
+    "pH",
+    "DO_percent",
+    "feed_rate_mL_h",
+    "initial_VCD_million_cells_mL",
+    "batch_age_h",
+]
 
 
-DO = st.sidebar.number_input(
-    "DO (%)",
-    min_value=0.0,
-    max_value=100.0,
-    value=40.0,
-    step=1.0
-)
+# -----------------------------
+# Helpers
+# -----------------------------
+def rmse(y_true, y_pred):
+    return float(np.sqrt(mean_squared_error(y_true, y_pred)))
 
 
-initial_VCD = st.sidebar.number_input(
-    "Initial VCD (million cells/mL)",
-    min_value=0.0,
-    value=0.5,
-    step=0.1
-)
+def fmt(x, digits=3):
+    if x is None or (isinstance(x, float) and np.isnan(x)):
+        return "—"
+    return f"{float(x):.{digits}f}"
 
 
-feed_rate = st.sidebar.number_input(
-    "Feed rate (mL/h)",
-    min_value=0.0,
-    value=0.5,
-    step=0.1
-)
+def pct(x):
+    return f"{float(x):.1f}%"
 
 
-impeller_type = st.sidebar.selectbox(
-    "Impeller type",
-    impeller_types
-)
+# -----------------------------
+# Data loading
+# -----------------------------
+@st.cache_data
+def load_data(path_string):
+    path = Path(path_string)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Data file not found: {path}. Put the Excel file beside app.py "
+            "or set SCALewise_DATA_FILE."
+        )
 
+    data = pd.read_excel(path)
 
-run_analysis = st.sidebar.button(
-    "🚀 RUN SCALEWISE ANALYSIS",
-    use_container_width=True
-)
-
-
-# ============================================================
-# TARGET SCALE REFERENCE ENGINE
-# ============================================================
-
-def get_reference_row():
-
-    target_data = physics_df[
-        physics_df["scale_L"] == target_scale
-    ].copy()
-
-    if len(target_data) == 0:
-
-        target_data = physics_df.copy()
-
-    # Find closest operating condition
-    target_data["distance"] = (
-
-        abs(target_data["rpm"] - rpm)
-        / max(target_data["rpm"].std(), 1)
-
-        +
-
-        abs(target_data["aeration_vvm"] - aeration)
-        / max(target_data["aeration_vvm"].std(), 0.001)
-
-        +
-
-        abs(target_data["DO_percent"] - DO)
-        / max(target_data["DO_percent"].std(), 1)
-
-        +
-
-        abs(target_data["temperature_C"] - temperature)
-        / max(target_data["temperature_C"].std(), 1)
-
-        +
-
-        abs(target_data["pH"] - pH)
-        / max(target_data["pH"].std(), 0.1)
+    required = set(
+        MODEL1_TARGETS
+        + MODEL1_FEATURES
+        + [
+            "batch_id",
+            "failure_event",
+            "medium",
+            "serum_condition",
+            "process_stage",
+        ]
     )
+    missing = sorted(required - set(data.columns))
+    if missing:
+        raise ValueError(f"Workbook is missing required columns: {missing}")
 
-    row = target_data.sort_values(
-        "distance"
-    ).iloc[0].copy()
-
-    return row
-
-
-# ============================================================
-# BUILD MODEL INPUT
-# ============================================================
-
-def build_model_input():
-
-    ref = get_reference_row()
-
-    row = {}
-
-    # --------------------------------------------------------
-    # Process variables
-    # --------------------------------------------------------
-
-    row["cell_line"] = cell_line
-    row["immobilization"] = immobilization
-    row["scale_L"] = target_scale
-    row["working_time_h"] = working_time
-    row["rpm"] = rpm
-    row["aeration_vvm"] = aeration
-    row["temperature_C"] = temperature
-    row["pH"] = pH
-    row["DO_percent"] = DO
-    row["initial_VCD_million_cells_mL"] = initial_VCD
-    row["feed_rate_mL_h"] = feed_rate
-
-    # --------------------------------------------------------
-    # Reference physical variables
-    # --------------------------------------------------------
-
-    row["PV_V_L"] = ref["PV_V_L"]
-    row["kLa_per_h"] = ref["kLa_per_h"]
-    row["mixing_time_s"] = ref["mixing_time_s"]
-    row["OTR_mmol_L_h"] = ref["OTR_mmol_L_h"]
-
-    row["tank_diameter_mm"] = ref["tank_diameter_mm"]
-    row["liquid_height_mm"] = ref["liquid_height_mm"]
-    row["impeller_diameter_mm"] = ref["impeller_diameter_mm"]
-
-    row["Reynolds_number"] = ref["Reynolds_number"]
-    row["tip_speed_m_s"] = ref["tip_speed_m_s"]
-
-    row["impeller_type"] = impeller_type
-
-    return pd.DataFrame([row])
+    return data
 
 
-# ============================================================
-# PREDICTION
-# ============================================================
-
-def predict_biology(input_df):
-
-    X = input_df.copy()
-
-    # Use exact training feature schema
-    if hasattr(preprocessor, "feature_names_in_"):
-
-        expected_features = list(
-            preprocessor.feature_names_in_
-        )
-
-        for col in expected_features:
-
-            if col not in X.columns:
-
-                X[col] = np.nan
-
-        X = X[expected_features]
-
-    X_transformed = preprocessor.transform(X)
-
-    predictions = {}
-
-    target_order = [
-        "VCD_million_cells_mL",
-        "viability_percent",
-        "growth_rate_per_h",
-        "glucose_g_L",
-        "lactate_g_L",
-        "osmolality_mOsm_kg"
-    ]
-
-    for target in target_order:
-
-        if target in model1_models:
-
-            predictions[target] = float(
-                model1_models[target]
-                .predict(X_transformed)[0]
-            )
-
-    return predictions
-
-
-# ============================================================
-# RANGE / COVERAGE ANALYSIS
-# ============================================================
-
-def range_score(value, series):
-
-    low = float(series.quantile(0.10))
-    high = float(series.quantile(0.90))
-
-    if low <= value <= high:
-
-        return 100.0, "WITHIN OBSERVED REGION"
-
-    elif series.min() <= value <= series.max():
-
-        return 70.0, "WITHIN OBSERVED RANGE"
-
-    else:
-
-        distance = min(
-            abs(value - series.min()),
-            abs(value - series.max())
-        )
-
-        span = max(
-            series.max() - series.min(),
-            1e-9
-        )
-
-        penalty = min(
-            60,
-            60 * distance / span
-        )
-
-        return max(
-            0,
-            40 - penalty
-        ), "EXTRAPOLATION"
-
-
-# ============================================================
-# PROCESS RISK ENGINE
-# ============================================================
-
-def calculate_risk(input_df, predictions):
-
-    row = input_df.iloc[0]
-
-    checks = {}
-
-    # --------------------------------------------------------
-    # Operating range checks
-    # --------------------------------------------------------
-
-    numeric_parameters = [
-
+# -----------------------------
+# Step 5A — physics engine
+# -----------------------------
+@st.cache_data
+def build_scale_physics_summary(data):
+    numeric = [
         "rpm",
         "aeration_vvm",
         "temperature_C",
         "pH",
         "DO_percent",
-        "PV_V_L",
+        "feed_rate_mL_h",
+        "tank_diameter_m",
+        "tank_height_m",
+        "impeller_diameter_m",
+        "PV_W_L",
         "kLa_per_h",
         "mixing_time_s",
         "OTR_mmol_L_h",
-        "Reynolds_number",
-        "tip_speed_m_s"
+        "reynolds_number",
+        "tip_speed_m_s",
     ]
 
-    scores = []
+    summary = data.groupby("scale_L")[numeric].median().reset_index()
+    summary["impeller_type"] = (
+        data.groupby("scale_L")["impeller_type"]
+        .agg(lambda s: s.dropna().mode().iloc[0] if not s.dropna().empty else "Pitched-blade")
+        .values
+    )
+    return summary.sort_values("scale_L").reset_index(drop=True)
 
-    for parameter in numeric_parameters:
 
-        if parameter not in physics_df.columns:
+def get_neighbors(summary, target_scale):
+    scales = summary["scale_L"].to_numpy(dtype=float)
 
-            continue
+    if target_scale in scales:
+        row = summary.loc[summary["scale_L"] == target_scale].iloc[0].to_dict()
+        return row, row, True
 
-        score, status = range_score(
-            row[parameter],
-            physics_df[parameter]
+    if target_scale < scales.min() or target_scale > scales.max():
+        raise ValueError(
+            f"Target scale must be between {scales.min():g} and {scales.max():g} L."
         )
 
-        checks[parameter] = {
-            "score": score,
-            "status": status
+    lower_scale = scales[scales < target_scale].max()
+    upper_scale = scales[scales > target_scale].min()
+
+    lower = summary.loc[summary["scale_L"] == lower_scale].iloc[0].to_dict()
+    upper = summary.loc[summary["scale_L"] == upper_scale].iloc[0].to_dict()
+
+    return lower, upper, False
+
+
+def log_interp(x, x0, x1, y0, y1):
+    if x0 == x1:
+        return float(y0)
+    w = (math.log(x) - math.log(x0)) / (math.log(x1) - math.log(x0))
+    return float(y0 + w * (y1 - y0))
+
+
+def target_scale_physics(summary, data, target_scale, rpm, aeration_vvm, temperature_C,
+                         pH, DO_percent, feed_rate_mL_h):
+
+    lower, upper, exact = get_neighbors(summary, float(target_scale))
+
+    ref = {}
+    for col in [
+        "tank_diameter_m",
+        "tank_height_m",
+        "impeller_diameter_m",
+        "PV_W_L",
+        "kLa_per_h",
+        "mixing_time_s",
+        "OTR_mmol_L_h",
+        "reynolds_number",
+    ]:
+        if exact:
+            ref[col] = float(lower[col])
+        else:
+            ref[col] = log_interp(
+                target_scale,
+                lower["scale_L"],
+                upper["scale_L"],
+                lower[col],
+                upper[col],
+            )
+
+    ref_rpm = log_interp(
+        target_scale,
+        lower["scale_L"],
+        upper["scale_L"],
+        lower["rpm"],
+        upper["rpm"],
+    )
+    ref_aeration = log_interp(
+        target_scale,
+        lower["scale_L"],
+        upper["scale_L"],
+        lower["aeration_vvm"],
+        upper["aeration_vvm"],
+    )
+    ref_do = log_interp(
+        target_scale,
+        lower["scale_L"],
+        upper["scale_L"],
+        lower["DO_percent"],
+        upper["DO_percent"],
+    )
+
+    # Constant-geometry power-density scaling:
+    # P/V approximately scales with N^3.
+    rpm_ratio = max(float(rpm), 1e-6) / max(ref_rpm, 1e-6)
+    pv = ref["PV_W_L"] * rpm_ratio**3
+
+    # Approximate kLa dependence on P/V and gas flow.
+    aeration_ratio = max(float(aeration_vvm), 1e-6) / max(ref_aeration, 1e-6)
+    kla = ref["kLa_per_h"] * math.sqrt(max(pv, 1e-9) / max(ref["PV_W_L"], 1e-9))
+    kla *= math.sqrt(aeration_ratio)
+
+    # Mixing time: approximately inversely related to rpm,
+    # with scale dependence already represented in the reference.
+    mixing = ref["mixing_time_s"] / max(rpm_ratio, 1e-6)
+
+    # Reynolds number scales approximately linearly with rpm
+    # when fluid properties and geometry are held at the target-scale reference.
+    reynolds = ref["reynolds_number"] * rpm_ratio
+
+    # Independent tip-speed calculation.
+    tip_speed = math.pi * ref["impeller_diameter_m"] * float(rpm) / 60.0
+
+    # OTR approximation using kLa and DO relative to reference.
+    otr = ref["OTR_mmol_L_h"]
+    otr *= max(kla, 1e-9) / max(ref["kLa_per_h"], 1e-9)
+    otr *= max(float(DO_percent), 1.0) / max(ref_do, 1.0)
+
+    impeller_type = (
+        lower["impeller_type"] if exact or lower["impeller_type"] == upper["impeller_type"]
+        else lower["impeller_type"]
+    )
+
+    result = {
+        "scale_L": float(target_scale),
+        "rpm": float(rpm),
+        "aeration_vvm": float(aeration_vvm),
+        "temperature_C": float(temperature_C),
+        "pH": float(pH),
+        "DO_percent": float(DO_percent),
+        "feed_rate_mL_h": float(feed_rate_mL_h),
+        "tank_diameter_m": float(ref["tank_diameter_m"]),
+        "tank_height_m": float(ref["tank_height_m"]),
+        "impeller_diameter_m": float(ref["impeller_diameter_m"]),
+        "impeller_type": str(impeller_type),
+        "PV_W_L": float(pv),
+        "kLa_per_h": float(kla),
+        "mixing_time_s": float(mixing),
+        "OTR_mmol_L_h": float(otr),
+        "reynolds_number": float(reynolds),
+        "tip_speed_m_s": float(tip_speed),
+        "lower_reference_scale_L": float(lower["scale_L"]),
+        "upper_reference_scale_L": float(upper["scale_L"]),
+        "reference_rpm": float(ref_rpm),
+        "reference_aeration_vvm": float(ref_aeration),
+        "reference_DO_percent": float(ref_do),
+    }
+
+    return result
+
+
+# -----------------------------
+# Step 3A/3B/3C — model training
+# -----------------------------
+@st.cache_resource
+def train_model1(data):
+    # Batch-aware split.
+    splitter = GroupShuffleSplit(n_splits=1, test_size=0.20, random_state=42)
+    train_idx, test_idx = next(
+        splitter.split(data, groups=data["batch_id"])
+    )
+
+    train_val = data.iloc[train_idx].copy()
+    test = data.iloc[test_idx].copy()
+
+    splitter2 = GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=43)
+    tr_idx, val_idx = next(
+        splitter2.split(train_val, groups=train_val["batch_id"])
+    )
+
+    train = train_val.iloc[tr_idx].copy()
+    val = train_val.iloc[val_idx].copy()
+
+    X_train = train[MODEL1_FEATURES].copy()
+    X_val = val[MODEL1_FEATURES].copy()
+    X_test = test[MODEL1_FEATURES].copy()
+
+    cat_cols = X_train.select_dtypes(
+        include=["object", "category", "bool"]
+    ).columns.tolist()
+    num_cols = [c for c in MODEL1_FEATURES if c not in cat_cols]
+
+    try:
+        encoder = OneHotEncoder(
+            handle_unknown="ignore",
+            sparse_output=False
+        )
+    except TypeError:
+        encoder = OneHotEncoder(
+            handle_unknown="ignore",
+            sparse=False
+        )
+
+    preprocessor = ColumnTransformer(
+        [
+            ("cat", encoder, cat_cols),
+            ("num", "passthrough", num_cols),
+        ],
+        remainder="drop",
+    )
+
+    Xtr = preprocessor.fit_transform(X_train)
+    Xv = preprocessor.transform(X_val)
+    Xt = preprocessor.transform(X_test)
+
+    feature_names = preprocessor.get_feature_names_out()
+
+    best_models = {}
+    validation_rows = []
+    test_rows = []
+
+    for target in MODEL1_TARGETS:
+        ytr = train[target].to_numpy()
+        yv = val[target].to_numpy()
+        yt = test[target].to_numpy()
+
+        candidates = {
+            "RandomForest": RandomForestRegressor(
+                n_estimators=300,
+                random_state=42,
+                n_jobs=-1,
+                max_features="sqrt",
+                min_samples_leaf=2,
+            ),
+            "GradientBoosting": GradientBoostingRegressor(
+                n_estimators=150,
+                learning_rate=0.05,
+                max_depth=3,
+                min_samples_leaf=5,
+                random_state=42,
+            ),
         }
 
-        scores.append(score)
+        fitted = {}
+        for name, model in candidates.items():
+            model.fit(Xtr, ytr)
+            pred_v = model.predict(Xv)
 
-    coverage_score = (
-        np.mean(scores)
-        if scores
-        else 50
+            validation_rows.append({
+                "target": target,
+                "model": name,
+                "R2": r2_score(yv, pred_v),
+                "MAE": mean_absolute_error(yv, pred_v),
+                "RMSE": rmse(yv, pred_v),
+            })
+            fitted[name] = model
+
+        # Select using validation only.
+        target_val = [
+            r for r in validation_rows if r["target"] == target
+        ]
+        selected_name = max(target_val, key=lambda r: r["R2"])["model"]
+        selected = fitted[selected_name]
+        best_models[target] = selected
+
+        pred_t = selected.predict(Xt)
+        test_rows.append({
+            "target": target,
+            "selected_model": selected_name,
+            "R2": r2_score(yt, pred_t),
+            "MAE": mean_absolute_error(yt, pred_t),
+            "RMSE": rmse(yt, pred_t),
+        })
+
+    # Anomaly model for risk assessment.
+    # It is deliberately not called a failure classifier.
+    anomaly = IsolationForest(
+        n_estimators=300,
+        contamination=0.05,
+        random_state=42,
+        n_jobs=-1,
     )
-
-    # --------------------------------------------------------
-    # Oxygen assessment
-    # --------------------------------------------------------
-
-    oxygen_flags = []
-
-    if DO < physics_df["DO_percent"].quantile(0.10):
-
-        oxygen_flags.append(
-            "DO is below the lower observed region."
-        )
-
-    if row["kLa_per_h"] < physics_df["kLa_per_h"].quantile(0.10):
-
-        oxygen_flags.append(
-            "kLa is below the lower observed region."
-        )
-
-    if (
-        row["OTR_mmol_L_h"]
-        < physics_df["OTR_mmol_L_h"].quantile(0.10)
-    ):
-
-        oxygen_flags.append(
-            "OTR is below the lower observed region."
-        )
-
-    # --------------------------------------------------------
-    # Hydrodynamic assessment
-    # --------------------------------------------------------
-
-    hydro_flags = []
-
-    if (
-        row["mixing_time_s"]
-        > physics_df["mixing_time_s"].quantile(0.90)
-    ):
-
-        hydro_flags.append(
-            "Mixing time is high relative to observed data."
-        )
-
-    if (
-        row["tip_speed_m_s"]
-        > physics_df["tip_speed_m_s"].quantile(0.90)
-    ):
-
-        hydro_flags.append(
-            "Tip speed is high relative to observed data."
-        )
-
-    # --------------------------------------------------------
-    # Biology assessment
-    # --------------------------------------------------------
-
-    biology_flags = []
-
-    if predictions.get(
-        "VCD_million_cells_mL",
-        0
-    ) < model1_df[
-        "VCD_million_cells_mL"
-    ].quantile(0.25):
-
-        biology_flags.append(
-            "Predicted VCD is below the lower biological quartile."
-        )
-
-    if predictions.get(
-        "lactate_g_L",
-        0
-    ) > model1_df[
-        "lactate_g_L"
-    ].quantile(0.75):
-
-        biology_flags.append(
-            "Predicted lactate is relatively high."
-        )
-
-    # --------------------------------------------------------
-    # Risk score
-    # --------------------------------------------------------
-
-    penalty = (
-
-        len(oxygen_flags) * 12
-
-        +
-
-        len(hydro_flags) * 10
-
-        +
-
-        len(biology_flags) * 8
-    )
-
-    overall_score = max(
-        0,
-        min(
-            100,
-            coverage_score - penalty
-        )
-    )
-
-    # --------------------------------------------------------
-    # STATUS
-    # --------------------------------------------------------
-
-    if overall_score >= 80:
-
-        status = "GREEN — WITHIN OBSERVED REGION"
-
-    elif overall_score >= 60:
-
-        status = "CONDITIONAL — VALIDATE BEFORE SCALE-UP"
-
-    else:
-
-        status = "RED — SIGNIFICANT EXTRAPOLATION / RISK"
-
-    # --------------------------------------------------------
-    # Risk band
-    # --------------------------------------------------------
-
-    if overall_score >= 80:
-
-        risk_band = "LOW"
-
-    elif overall_score >= 60:
-
-        risk_band = "WATCH"
-
-    elif overall_score >= 40:
-
-        risk_band = "HIGH"
-
-    else:
-
-        risk_band = "CRITICAL"
-
-    # --------------------------------------------------------
-    # Confidence
-    # --------------------------------------------------------
-
-    confidence = min(
-        98,
-        max(
-            50,
-            coverage_score
-        )
-    )
-
-    # --------------------------------------------------------
-    # Warning
-    # --------------------------------------------------------
-
-    warnings = (
-        oxygen_flags
-        + hydro_flags
-        + biology_flags
-    )
-
-    if len(warnings) == 0:
-
-        warning = (
-            "No major rule-based warning detected. "
-            "Continue monitoring the selected operating region."
-        )
-
-    else:
-
-        warning = " ".join(warnings)
-
-    # --------------------------------------------------------
-    # Action
-    # --------------------------------------------------------
-
-    if oxygen_flags:
-
-        action = (
-            "Review DO, kLa and oxygen-transfer conditions "
-            "before proceeding."
-        )
-
-    elif hydro_flags:
-
-        action = (
-            "Review agitation, mixing time and tip speed "
-            "and confirm hydrodynamic similarity."
-        )
-
-    elif biology_flags:
-
-        action = (
-            "Review predicted biological response and "
-            "perform a validation experiment."
-        )
-
-    else:
-
-        action = (
-            "Continue monitoring and experimentally validate "
-            "the selected operating region."
-        )
-
-    # --------------------------------------------------------
-    # Recommended validation
-    # --------------------------------------------------------
-
-    validation = (
-        "Run a target-scale validation experiment and "
-        "compare VCD, viability, lactate and oxygen-transfer "
-        "behaviour against the prediction."
-    )
+    anomaly.fit(Xtr)
 
     return {
-        "score": overall_score,
-        "status": status,
-        "risk_band": risk_band,
-        "confidence": confidence,
-        "warning": warning,
-        "action": action,
-        "validation": validation,
-        "checks": checks,
-        "oxygen_flags": oxygen_flags,
-        "hydro_flags": hydro_flags,
-        "biology_flags": biology_flags
+        "preprocessor": preprocessor,
+        "feature_names": feature_names,
+        "best_models": best_models,
+        "validation_results": pd.DataFrame(validation_rows),
+        "test_results": pd.DataFrame(test_rows),
+        "anomaly_model": anomaly,
+        "train": train,
+        "validation": val,
+        "test": test,
     }
 
 
-# ============================================================
-# HEATMAP GENERATOR
-# ============================================================
-
-def make_heatmap(
-    x_parameter,
-    y_parameter,
-    input_df
+# -----------------------------
+# Step 5C — build model input
+# -----------------------------
+def build_model_input(
+    physics,
+    cell_line,
+    batch_age_h,
+    initial_VCD_million_cells_mL,
 ):
+    row = {
+        "cell_line": cell_line,
+        "scale_L": physics["scale_L"],
+        "batch_age_h": batch_age_h,
+        "rpm": physics["rpm"],
+        "aeration_vvm": physics["aeration_vvm"],
+        "temperature_C": physics["temperature_C"],
+        "pH": physics["pH"],
+        "DO_percent": physics["DO_percent"],
+        "initial_VCD_million_cells_mL": initial_VCD_million_cells_mL,
+        "feed_rate_mL_h": physics["feed_rate_mL_h"],
+        "PV_W_L": physics["PV_W_L"],
+        "kLa_per_h": physics["kLa_per_h"],
+        "mixing_time_s": physics["mixing_time_s"],
+        "OTR_mmol_L_h": physics["OTR_mmol_L_h"],
+        "tank_diameter_m": physics["tank_diameter_m"],
+        "tank_height_m": physics["tank_height_m"],
+        "impeller_diameter_m": physics["impeller_diameter_m"],
+        "reynolds_number": physics["reynolds_number"],
+        "tip_speed_m_s": physics["tip_speed_m_s"],
+        "impeller_type": physics["impeller_type"],
+    }
 
-    base = input_df.iloc[0].to_dict()
+    return pd.DataFrame([row])[MODEL1_FEATURES]
 
-    # --------------------------------------------------------
-    # Available data
-    # --------------------------------------------------------
 
-    if x_parameter in physics_df.columns:
+def predict_model1(model_bundle, model_input):
+    X = model_bundle["preprocessor"].transform(model_input)
+    predictions = {}
 
-        x_series = physics_df[
-            x_parameter
-        ].dropna()
+    for target, model in model_bundle["best_models"].items():
+        predictions[target] = float(model.predict(X)[0])
 
-    elif x_parameter in model1_df.columns:
+    return pd.DataFrame([predictions])
 
-        x_series = model1_df[
-            x_parameter
-        ].dropna()
 
+# -----------------------------
+# Step 5D — risk engine
+# -----------------------------
+def percentile_distance(value, low, high):
+    if value < low:
+        return (low - value) / max(abs(high - low), 1e-9)
+    if value > high:
+        return (value - high) / max(abs(high - low), 1e-9)
+    return 0.0
+
+
+def build_risk_score(
+    data,
+    model_bundle,
+    physics,
+    model_input,
+    target_scale,
+):
+    # Use the central 90% of observed data as a "normal operating envelope".
+    risk_specs = {
+        "rpm": ("rpm", "RPM"),
+        "aeration_vvm": ("aeration_vvm", "Aeration"),
+        "DO_percent": ("DO_percent", "Dissolved oxygen"),
+        "PV_W_L": ("PV_W_L", "Power density"),
+        "kLa_per_h": ("kLa_per_h", "kLa"),
+        "mixing_time_s": ("mixing_time_s", "Mixing time"),
+        "OTR_mmol_L_h": ("OTR_mmol_L_h", "OTR"),
+        "reynolds_number": ("reynolds_number", "Reynolds number"),
+        "tip_speed_m_s": ("tip_speed_m_s", "Tip speed"),
+    }
+
+    factors = []
+
+    for key, (column, label) in risk_specs.items():
+        q05, q95 = data[column].quantile([0.05, 0.95])
+        value = float(physics[key])
+        dist = percentile_distance(value, q05, q95)
+
+        if dist > 0:
+            # Convert envelope excursion to 0–30 factor points.
+            score = min(30.0, 12.0 + 30.0 * dist)
+            factors.append({
+                "factor": label,
+                "value": value,
+                "reference_low": q05,
+                "reference_high": q95,
+                "factor_score": score,
+                "message": (
+                    f"{label}={value:.3g} is outside the central 90% "
+                    f"training envelope ({q05:.3g}–{q95:.3g})."
+                ),
+            })
+
+    # Scale interpolation / extrapolation risk.
+    observed_scales = sorted(data["scale_L"].unique().tolist())
+    min_scale = min(observed_scales)
+    max_scale = max(observed_scales)
+
+    if target_scale < min_scale or target_scale > max_scale:
+        factors.append({
+            "factor": "Scale extrapolation",
+            "value": target_scale,
+            "reference_low": min_scale,
+            "reference_high": max_scale,
+            "factor_score": 35.0,
+            "message": "Target scale is outside the observed dataset range.",
+        })
+    elif target_scale not in observed_scales:
+        lower = max(s for s in observed_scales if s < target_scale)
+        upper = min(s for s in observed_scales if s > target_scale)
+        gap = math.log(upper / lower)
+        factors.append({
+            "factor": "Scale interpolation",
+            "value": target_scale,
+            "reference_low": lower,
+            "reference_high": upper,
+            "factor_score": min(18.0, 5.0 + 5.0 * gap),
+            "message": (
+                f"Target scale is interpolated between {lower:g} L and {upper:g} L."
+            ),
+        })
+
+    # Model anomaly score.
+    X = model_bundle["preprocessor"].transform(model_input)
+    raw_anomaly = float(model_bundle["anomaly_model"].decision_function(X)[0])
+    is_anomaly = int(model_bundle["anomaly_model"].predict(X)[0]) == -1
+
+    if is_anomaly:
+        factors.append({
+            "factor": "Multivariate operating envelope",
+            "value": raw_anomaly,
+            "reference_low": None,
+            "reference_high": None,
+            "factor_score": 25.0,
+            "message": (
+                "The combined input/physics vector is unusual relative to "
+                "the training distribution."
+            ),
+        })
+
+    # Keep total in 0–100.
+    raw_score = sum(f["factor_score"] for f in factors)
+    risk_score = float(min(100.0, raw_score))
+
+    if risk_score < 25:
+        level = "LOW"
+    elif risk_score < 50:
+        level = "MODERATE"
+    elif risk_score < 75:
+        level = "HIGH"
     else:
+        level = "CRITICAL"
 
-        x_series = pd.Series([0, 1])
+    # Evidence confidence, not probability of failure.
+    #
+    # High when:
+    #   - target is inside observed scale range
+    #   - target is close to observed reference scales
+    #   - input is inside central training envelope
+    #
+    # Lower when:
+    #   - target is interpolated over a large scale gap
+    #   - physics are outside training envelope
+    #   - multivariate anomaly is detected
+    confidence = 92.0
 
-    if y_parameter in physics_df.columns:
+    if target_scale not in observed_scales:
+        confidence -= 8.0
 
-        y_series = physics_df[
-            y_parameter
-        ].dropna()
+    if any(f["factor"] == "Multivariate operating envelope" for f in factors):
+        confidence -= 18.0
 
-    elif y_parameter in model1_df.columns:
+    out_of_envelope = sum(
+        1 for f in factors
+        if f["factor"] not in ["Scale interpolation", "Scale extrapolation",
+                               "Multivariate operating envelope"]
+    )
+    confidence -= min(35.0, 6.0 * out_of_envelope)
 
-        y_series = model1_df[
-            y_parameter
-        ].dropna()
+    confidence = float(np.clip(confidence, 35.0, 95.0))
 
-    else:
-
-        y_series = pd.Series([0, 1])
-
-    # --------------------------------------------------------
-    # 15 x 15 grid
-    # --------------------------------------------------------
-
-    x_values = np.linspace(
-        x_series.quantile(0.05),
-        x_series.quantile(0.95),
-        15
+    # Prioritize largest factor.
+    factors_sorted = sorted(
+        factors, key=lambda x: x["factor_score"], reverse=True
     )
 
-    y_values = np.linspace(
-        y_series.quantile(0.05),
-        y_series.quantile(0.95),
-        15
-    )
-
-    results = []
-
-    for y in y_values:
-
-        row_values = []
-
-        for x in x_values:
-
-            candidate = base.copy()
-
-            candidate[x_parameter] = float(x)
-            candidate[y_parameter] = float(y)
-
-            candidate_df = pd.DataFrame(
-                [candidate]
+    if not factors_sorted:
+        suggested_action = (
+            "Proceed to engineering verification; no major data-envelope "
+            "warning was detected."
+        )
+        validation = [
+            "Confirm target-scale geometry and impeller configuration.",
+            "Run mixing-time and kLa verification at pilot scale.",
+            "Confirm oxygen-transfer capacity before production use.",
+        ]
+    else:
+        top = factors_sorted[0]["factor"]
+        if "oxygen" in top.lower() or top == "OTR":
+            suggested_action = (
+                "Verify oxygen-transfer capacity and DO control before increasing scale."
             )
+            validation = [
+                "Measure kLa at target operating conditions.",
+                "Run an OTR/OUR balance or oxygen-transfer challenge test.",
+                "Confirm DO cascade response and alarm limits.",
+            ]
+        elif "mixing" in top.lower():
+            suggested_action = (
+                "Verify mixing performance before scale-up; do not rely on geometry alone."
+            )
+            validation = [
+                "Measure mixing time using a tracer or equivalent method.",
+                "Check local pH/DO gradients.",
+                "Verify impeller clearance and power draw.",
+            ]
+        elif "power" in top.lower() or "RPM" in top:
+            suggested_action = (
+                "Check mechanical power input and shear exposure before scale-up."
+            )
+            validation = [
+                "Verify P/V and shaft power experimentally.",
+                "Check tip speed and shear-sensitive cell response.",
+                "Confirm motor/drive operating margin.",
+            ]
+        elif "Scale" in top:
+            suggested_action = (
+                "Treat this as a scale-interpolation uncertainty and add an intermediate validation scale."
+            )
+            validation = [
+                "Validate at an intermediate scale.",
+                "Compare mixing, kLa, P/V and DO response against the model.",
+                "Use the measured pilot data to recalibrate the scale-up model.",
+            ]
+        else:
+            suggested_action = (
+                "Hold the proposed condition for engineering review and targeted pilot validation."
+            )
+            validation = [
+                "Repeat the prediction with measured target-scale physics.",
+                "Run a controlled pilot batch.",
+                "Compare measured process trajectories with model predictions.",
+            ]
 
-            try:
-
-                pred = predict_biology(
-                    candidate_df
-                )
-
-                value = pred.get(
-                    "VCD_million_cells_mL",
-                    np.nan
-                )
-
-            except Exception:
-
-                value = np.nan
-
-            row_values.append(value)
-
-        results.append(row_values)
-
-    heatmap = pd.DataFrame(
-        results,
-        index=np.round(y_values, 3),
-        columns=np.round(x_values, 3)
-    )
-
-    return heatmap
+    return {
+        "risk_score": risk_score,
+        "risk_level": level,
+        "confidence": confidence,
+        "factors": factors_sorted,
+        "suggested_action": suggested_action,
+        "recommended_validation": validation,
+        "anomaly_score": raw_anomaly,
+        "failure_model_available": False,
+    }
 
 
-# ============================================================
-# RUN ANALYSIS
-# ============================================================
-
-if run_analysis:
-
-    input_df = build_model_input()
-
-    predictions = predict_biology(
-        input_df
-    )
-
-    risk = calculate_risk(
-        input_df,
-        predictions
-    )
-
-    st.session_state["input_df"] = input_df
-    st.session_state["predictions"] = predictions
-    st.session_state["risk"] = risk
-
-    st.session_state["analysis_complete"] = True
-
-
-# ============================================================
-# DEFAULT ANALYSIS
-# ============================================================
-
-if "analysis_complete" not in st.session_state:
-
-    input_df = build_model_input()
+# -----------------------------
+# AI Copilot
+# -----------------------------
+def copilot_answer(user_message, context, chat_history):
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return (
+            "AI Copilot is not connected because OPENAI_API_KEY is not set. "
+            "The process-risk and prediction modules are still available. "
+            "Set OPENAI_API_KEY in the deployment secrets/environment to enable live AI chat."
+        )
 
     try:
+        from openai import OpenAI
 
-        predictions = predict_biology(
-            input_df
+        client = OpenAI(api_key=api_key)
+        model_name = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
+
+        system_instructions = """
+You are ScaleWise Copilot, an engineering decision-support assistant for
+bioprocess/fermentation scale-up.
+
+Rules:
+1. Use the supplied current run context as the primary source.
+2. Do not invent experimental results.
+3. Distinguish model prediction, physics estimate, risk score and confirmed
+   experimental evidence.
+4. The workbook's failure_event column contains only zeros, so there is no
+   supervised historical failure probability. Never present the risk score
+   as a calibrated probability of batch failure.
+5. Explain why a warning exists and give practical validation steps.
+6. If the user asks for a change in an input, explain the expected direction
+   of effect but recommend validation before implementation.
+7. Be concise but technically useful.
+"""
+
+        conversation = []
+        for item in chat_history[-8:]:
+            conversation.append({
+                "role": item["role"],
+                "content": item["content"],
+            })
+
+        prompt = (
+            f"{system_instructions}\n\n"
+            f"CURRENT SCALEWISE CONTEXT:\n{json.dumps(context, indent=2, default=str)}\n\n"
+            f"USER QUESTION:\n{user_message}"
         )
 
-        risk = calculate_risk(
-            input_df,
-            predictions
+        response = client.responses.create(
+            model=model_name,
+            input=prompt,
         )
 
-        st.session_state["input_df"] = input_df
-        st.session_state["predictions"] = predictions
-        st.session_state["risk"] = risk
+        return response.output_text
 
-        st.session_state["analysis_complete"] = True
+    except Exception as exc:
+        return (
+            "The AI Copilot could not complete the request. "
+            f"Technical message: {exc}"
+        )
 
-    except Exception as e:
 
+# ============================================================
+# UI
+# ============================================================
+st.title("🧬 ScaleWise")
+st.caption(
+    "Bioprocess scale-up prediction • physics-based risk assessment • AI copilot"
+)
+
+with st.sidebar:
+    st.header("1. Define the process")
+
+    if not DATA_FILE.exists():
+        st.error(f"Data file not found: {DATA_FILE}")
+        st.stop()
+
+    try:
+        data = load_data(str(DATA_FILE))
+    except Exception as exc:
+        st.error(str(exc))
+        st.stop()
+
+    scale_summary = build_scale_physics_summary(data)
+
+    observed_scales = sorted(data["scale_L"].unique().tolist())
+
+    # Include 50 L because it is a useful interpolated scale, while
+    # keeping observed scales visibly distinct.
+    suggested_interpolated = [50, 250, 750, 2500, 7500]
+    scale_options = sorted(
+        set(
+            [float(x) for x in observed_scales]
+            + [
+                float(x)
+                for x in suggested_interpolated
+                if min(observed_scales) <= x <= max(observed_scales)
+            ]
+        )
+    )
+
+    target_scale = st.selectbox(
+        "Target working volume (L)",
+        scale_options,
+        index=scale_options.index(50.0) if 50.0 in scale_options else 0,
+        help="Observed scales come from the workbook. Additional values are interpolated."
+    )
+
+    cell_line = st.selectbox(
+        "Cell line",
+        sorted(data["cell_line"].dropna().unique().tolist())
+    )
+
+    impeller_type = st.selectbox(
+        "Impeller type",
+        sorted(data["impeller_type"].dropna().unique().tolist())
+    )
+
+    medium = st.selectbox(
+        "Medium",
+        sorted(data["medium"].dropna().unique().tolist())
+    )
+
+    serum_condition = st.selectbox(
+        "Serum condition",
+        sorted(data["serum_condition"].dropna().unique().tolist())
+    )
+
+    process_stage = st.selectbox(
+        "Process stage",
+        sorted(data["process_stage"].dropna().unique().tolist())
+    )
+
+    def slider_from_data(column, label, step):
+        lo = float(data[column].min())
+        hi = float(data[column].max())
+        default = float(data[column].median())
+        return st.slider(
+            label,
+            min_value=lo,
+            max_value=hi,
+            value=default,
+            step=step,
+        )
+
+    rpm = slider_from_data("rpm", "Agitation (rpm)", 1.0)
+    aeration = slider_from_data("aeration_vvm", "Aeration (vvm)", 0.005)
+    temperature = slider_from_data("temperature_C", "Temperature (°C)", 0.1)
+    pH = slider_from_data("pH", "pH", 0.01)
+    DO = slider_from_data("DO_percent", "DO (%)", 0.5)
+    feed = slider_from_data("feed_rate_mL_h", "Feed rate (mL/h)", 0.01)
+    initial_vcd = slider_from_data(
+        "initial_VCD_million_cells_mL",
+        "Initial VCD (million cells/mL)",
+        0.005,
+    )
+    batch_age = slider_from_data("batch_age_h", "Batch age (h)", 0.5)
+
+    st.divider()
+    st.caption(
+        f"Dataset: {len(data):,} rows • observed scales: "
+        + ", ".join(f"{int(x):,}" for x in observed_scales)
+        + " L"
+    )
+
+    if data["failure_event"].nunique() == 1:
         st.warning(
-            "Click RUN SCALEWISE ANALYSIS after "
-            "the model artifacts are loaded."
+            "Failure labels are not usable: failure_event has only one class (0). "
+            "Risk is therefore physics/data-envelope based."
         )
 
-        st.code(str(e))
+
+# Train/cache models.
+with st.spinner("Preparing physics and prediction models…"):
+    model_bundle = train_model1(data)
+
+
+# -----------------------------
+# Current prediction
+# -----------------------------
+physics = target_scale_physics(
+    scale_summary,
+    data,
+    target_scale=float(target_scale),
+    rpm=rpm,
+    aeration_vvm=aeration,
+    temperature_C=temperature,
+    pH=pH,
+    DO_percent=DO,
+    feed_rate_mL_h=feed,
+)
+
+model_input = build_model_input(
+    physics,
+    cell_line=cell_line,
+    batch_age_h=batch_age,
+    initial_VCD_million_cells_mL=initial_vcd,
+)
+
+predictions = predict_model1(model_bundle, model_input)
+
+risk = build_risk_score(
+    data,
+    model_bundle,
+    physics,
+    model_input,
+    target_scale=float(target_scale),
+)
 
 
 # ============================================================
-# MAIN DASHBOARD
+# Dashboard
 # ============================================================
-
-if "analysis_complete" in st.session_state:
-
-    predictions = st.session_state[
-        "predictions"
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    [
+        "📊 Dashboard",
+        "⚙️ Scale-Up Physics",
+        "🚦 Risk Scorecard",
+        "🧪 Validation",
+        "🤖 AI Copilot",
     ]
+)
 
-    risk = st.session_state[
-        "risk"
-    ]
-
-    input_df = st.session_state[
-        "input_df"
-    ]
-
-
-    # ========================================================
-    # TOP SUMMARY
-    # ========================================================
-
-    st.header("📊 ScaleWise Analysis Summary")
+with tab1:
+    st.subheader("Scale-up decision dashboard")
 
     c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Target scale", f"{target_scale:,.0f} L")
+    c2.metric("Risk score", f"{risk['risk_score']:.0f}/100")
+    c3.metric("Risk level", risk["risk_level"])
+    c4.metric("Evidence confidence", f"{risk['confidence']:.0f}%")
 
-    c1.metric(
-        "Target scale",
-        f"{target_scale:g} L"
+    st.divider()
+
+    st.markdown("### Predicted biological outcomes")
+
+    prediction_display = predictions.T.reset_index()
+    prediction_display.columns = ["Variable", "Predicted value"]
+    st.dataframe(
+        prediction_display,
+        use_container_width=True,
+        hide_index=True,
     )
 
-    c2.metric(
-        "Process readiness",
-        f"{risk['score']:.1f}/100"
+    st.markdown("### Current engineering condition")
+
+    eng_cols = [
+        "scale_L",
+        "rpm",
+        "aeration_vvm",
+        "DO_percent",
+        "temperature_C",
+        "pH",
+        "tank_diameter_m",
+        "tank_height_m",
+        "impeller_diameter_m",
+        "PV_W_L",
+        "kLa_per_h",
+        "mixing_time_s",
+        "OTR_mmol_L_h",
+        "reynolds_number",
+        "tip_speed_m_s",
+        "impeller_type",
+    ]
+    st.dataframe(
+        pd.DataFrame([physics])[eng_cols].T.rename(columns={0: "Value"}),
+        use_container_width=True,
     )
 
-    c3.metric(
-        "Risk level",
-        risk["risk_band"]
-    )
-
-    c4.metric(
-        "Confidence",
-        f"{risk['confidence']:.1f}%"
+    st.info(
+        "The dashboard combines Model-1 biological predictions with a "
+        "physics/data-envelope risk assessment. It is a decision-support "
+        "tool, not a substitute for pilot validation."
     )
 
 
-    # ========================================================
-    # TABS
-    # ========================================================
+with tab2:
+    st.subheader("5A–5B: Target-scale physics engine")
 
-    tab1, tab2, tab3, tab4 = st.tabs(
-        [
-            "🛡️ Process Risk Scorecard",
-            "🚨 Scale-Up Risk Guardian",
-            "🔥 Heatmap Explorer",
-            "🤖 AI Copilot"
-        ]
+    st.markdown(
+        "The target scale is interpolated between the nearest observed scales "
+        "when it is not directly present in the workbook."
     )
 
+    p1, p2 = st.columns(2)
 
-    # ========================================================
-    # TAB 1 — SCORECARD
-    # ========================================================
-
-    with tab1:
-
-        st.subheader(
-            "Process Risk Scorecard"
-        )
-
-        st.metric(
-            "Overall Process Readiness",
-            f"{risk['score']:.1f}/100"
-        )
-
-        if risk["score"] >= 80:
-
-            st.success(
-                "GREEN — Operating condition is largely "
-                "inside the observed data region."
-            )
-
-        elif risk["score"] >= 60:
-
-            st.warning(
-                "CONDITIONAL — The condition is usable as a "
-                "prototype scenario, but validation is required "
-                "before claiming scale-up readiness."
-            )
-
-        else:
-
-            st.error(
-                "RED — Significant extrapolation or process "
-                "risk detected."
-            )
-
-
-        st.markdown("### What does the status mean?")
-
+    with p1:
+        st.markdown("**Reference scales**")
         st.write(
-            f"""
-            **{risk['status']}**
-
-            The status is calculated from how closely the selected
-            operating condition matches the observed experimental
-            region, together with oxygen-transfer, hydrodynamic
-            and predicted biological indicators.
-
-            **Conditional does NOT mean process failure.**
-
-            It means that the current condition should undergo
-            additional validation before being considered suitable
-            for scale-up.
-            """
+            f"Lower reference: **{physics['lower_reference_scale_L']:g} L**"
+        )
+        st.write(
+            f"Upper reference: **{physics['upper_reference_scale_L']:g} L**"
         )
 
-
-        st.markdown(
-            "### Parameter coverage"
+    with p2:
+        st.markdown("**Reference operating point**")
+        st.write(f"Reference rpm: **{physics['reference_rpm']:.2f}**")
+        st.write(
+            f"Reference aeration: **{physics['reference_aeration_vvm']:.4f} vvm**"
+        )
+        st.write(
+            f"Reference DO: **{physics['reference_DO_percent']:.2f}%**"
         )
 
-        coverage_rows = []
+    st.markdown("### Calculated scale-up physics")
 
-        for parameter, values in risk[
-            "checks"
-        ].items():
+    physics_table = pd.DataFrame({
+        "Parameter": [
+            "Tank diameter",
+            "Tank height",
+            "Impeller diameter",
+            "P/V",
+            "kLa",
+            "Mixing time",
+            "OTR",
+            "Reynolds number",
+            "Tip speed",
+            "Impeller type",
+        ],
+        "Value": [
+            f"{physics['tank_diameter_m']:.4f} m",
+            f"{physics['tank_height_m']:.4f} m",
+            f"{physics['impeller_diameter_m']:.4f} m",
+            f"{physics['PV_W_L']:.5f} W/L",
+            f"{physics['kLa_per_h']:.3f} 1/h",
+            f"{physics['mixing_time_s']:.2f} s",
+            f"{physics['OTR_mmol_L_h']:.3f} mmol/L/h",
+            f"{physics['reynolds_number']:.1f}",
+            f"{physics['tip_speed_m_s']:.3f} m/s",
+            physics["impeller_type"],
+        ],
+    })
+    st.dataframe(physics_table, use_container_width=True, hide_index=True)
 
-            coverage_rows.append(
-                {
-                    "Parameter": parameter,
-                    "Score": round(
-                        values["score"],
-                        1
-                    ),
-                    "Status": values["status"]
-                }
-            )
+    st.markdown("### Scale reference table")
+    st.dataframe(
+        scale_summary[
+            [
+                "scale_L",
+                "rpm",
+                "aeration_vvm",
+                "PV_W_L",
+                "kLa_per_h",
+                "mixing_time_s",
+                "OTR_mmol_L_h",
+            ]
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
 
-        coverage_df = pd.DataFrame(
-            coverage_rows
-        )
 
+with tab3:
+    st.subheader("Process risk scorecard")
+
+    level = risk["risk_level"]
+
+    if level == "LOW":
+        st.success(f"Risk: {level} — score {risk['risk_score']:.0f}/100")
+    elif level == "MODERATE":
+        st.warning(f"Risk: {level} — score {risk['risk_score']:.0f}/100")
+    else:
+        st.error(f"Risk: {level} — score {risk['risk_score']:.0f}/100")
+
+    st.metric(
+        "Assessment confidence",
+        f"{risk['confidence']:.0f}%",
+        help=(
+            "This is evidence/coverage confidence in the risk assessment. "
+            "It is NOT the probability of batch failure."
+        ),
+    )
+
+    st.markdown("### Scale-up failure predictor")
+
+    st.write(
+        f"**Assessment:** {risk['risk_level']} risk of scale-up difficulty"
+    )
+    st.write(
+        f"**Confidence:** {risk['confidence']:.0f}% evidence/coverage confidence"
+    )
+
+    st.caption(
+        "Important: the uploaded data contains no positive failure events. "
+        "Therefore this assessment is not a calibrated probability of failure."
+    )
+
+    st.markdown("### Warning factors")
+
+    if not risk["factors"]:
+        st.success("No major warning factors detected.")
+    else:
+        rows = []
+        for f in risk["factors"]:
+            rows.append({
+                "Warning": f["factor"],
+                "Value": f"{f['value']:.4g}",
+                "Reference": (
+                    "—"
+                    if f["reference_low"] is None
+                    else f"{f['reference_low']:.4g} – {f['reference_high']:.4g}"
+                ),
+                "Risk contribution": f"{f['factor_score']:.1f}",
+                "Interpretation": f["message"],
+            })
         st.dataframe(
-            coverage_df,
+            pd.DataFrame(rows),
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
         )
 
+    st.markdown("### Suggested action")
+    st.info(risk["suggested_action"])
 
-        st.markdown(
-            "### Predicted biological performance"
-        )
+    st.markdown("### Recommended validation")
+    for item in risk["recommended_validation"]:
+        st.write("• " + item)
 
-        biology_display = {
-            "VCD (million cells/mL)":
-                predictions.get(
-                    "VCD_million_cells_mL",
-                    np.nan
+
+with tab4:
+    st.subheader("Recommended validation plan")
+
+    st.markdown("### Model performance")
+
+    st.dataframe(
+        model_bundle["test_results"].round(4),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.markdown("### Target-scale validation sequence")
+
+    validation_steps = [
+        ("1. Geometry", "Verify tank diameter, liquid height, impeller diameter, clearance and working volume."),
+        ("2. Hydrodynamics", "Measure/verify P/V, tip speed, Reynolds number and mixing time."),
+        ("3. Oxygen transfer", "Measure kLa and confirm OTR under the proposed aeration/DO condition."),
+        ("4. Control response", "Challenge the DO/pH control loop and confirm actuator capacity."),
+        ("5. Biological pilot", "Run a controlled pilot batch and compare VCD, viability, glucose and lactate trajectories."),
+        ("6. Model update", "Use measured pilot data to recalibrate the scale-up model before the next scale."),
+    ]
+
+    for title, description in validation_steps:
+        st.markdown(f"**{title}** — {description}")
+
+    st.markdown("### Current target-scale input")
+    st.dataframe(
+        model_input.T.rename(columns={0: "Value"}),
+        use_container_width=True,
+    )
+
+
+with tab5:
+    st.subheader("🤖 Interactive ScaleWise AI Copilot")
+
+    st.caption(
+        "Ask about the current scale-up scenario, warnings, predicted outcomes, "
+        "or what validation should be performed next."
+    )
+
+    context = {
+        "target_scale_L": target_scale,
+        "cell_line": cell_line,
+        "medium": medium,
+        "serum_condition": serum_condition,
+        "process_stage": process_stage,
+        "user_inputs": {
+            "rpm": rpm,
+            "aeration_vvm": aeration,
+            "temperature_C": temperature,
+            "pH": pH,
+            "DO_percent": DO,
+            "feed_rate_mL_h": feed,
+            "initial_VCD_million_cells_mL": initial_vcd,
+            "batch_age_h": batch_age,
+            "impeller_type_requested": impeller_type,
+        },
+        "physics": physics,
+        "predictions": predictions.iloc[0].to_dict(),
+        "risk": {
+            "score": risk["risk_score"],
+            "level": risk["risk_level"],
+            "confidence": risk["confidence"],
+            "warnings": [f["message"] for f in risk["factors"]],
+            "suggested_action": risk["suggested_action"],
+            "recommended_validation": risk["recommended_validation"],
+        },
+        "data_note": (
+            "failure_event has only one class (0) in the supplied workbook; "
+            "no supervised failure probability is available."
+        ),
+    }
+
+    if "copilot_messages" not in st.session_state:
+        st.session_state.copilot_messages = [
+            {
+                "role": "assistant",
+                "content": (
+                    "I’m ScaleWise Copilot. I can explain the current scale-up "
+                    "prediction, risk warnings, engineering variables and "
+                    "recommended validation. What would you like to know?"
                 ),
-
-            "Viability (%)":
-                predictions.get(
-                    "viability_percent",
-                    np.nan
-                ),
-
-            "Growth rate (/h)":
-                predictions.get(
-                    "growth_rate_per_h",
-                    np.nan
-                ),
-
-            "Lactate (g/L)":
-                predictions.get(
-                    "lactate_g_L",
-                    np.nan
-                )
-        }
-
-        st.dataframe(
-            pd.DataFrame(
-                biology_display,
-                index=["Prediction"]
-            ).T,
-            use_container_width=True
-        )
-
-
-    # ========================================================
-    # TAB 2 — RISK GUARDIAN
-    # ========================================================
-
-    with tab2:
-
-        st.subheader(
-            "🚨 Scale-Up Risk Guardian"
-        )
-
-        r1, r2, r3 = st.columns(3)
-
-        r1.metric(
-            "Risk level",
-            risk["risk_band"]
-        )
-
-        r2.metric(
-            "Risk confidence",
-            f"{risk['confidence']:.1f}%"
-        )
-
-        r3.metric(
-            "Warning signals",
-            str(
-                len(
-                    risk["oxygen_flags"]
-                    + risk["hydro_flags"]
-                    + risk["biology_flags"]
-                )
-            )
-        )
-
-
-        st.markdown(
-            "### 🔔 Risk assessment"
-        )
-
-        if risk["risk_band"] == "LOW":
-
-            st.success(
-                "LOW RISK — No major rule-based warning "
-                "has been detected in the selected region."
-            )
-
-        elif risk["risk_band"] == "WATCH":
-
-            st.warning(
-                "WATCH — The selected condition requires "
-                "additional monitoring and validation."
-            )
-
-        elif risk["risk_band"] == "HIGH":
-
-            st.error(
-                "HIGH RISK — One or more process conditions "
-                "are outside the preferred observed region."
-            )
-
-        else:
-
-            st.error(
-                "CRITICAL — Significant extrapolation or "
-                "multiple process warnings detected."
-            )
-
-
-        st.markdown(
-            "### ⚠️ Warning"
-        )
-
-        st.write(
-            risk["warning"]
-        )
-
-
-        st.markdown(
-            "### 🔎 Why is this risky?"
-        )
-
-        if risk["oxygen_flags"]:
-
-            st.write(
-                "**Oxygen-transfer concern:**"
-            )
-
-            for item in risk["oxygen_flags"]:
-
-                st.write(
-                    f"• {item}"
-                )
-
-        if risk["hydro_flags"]:
-
-            st.write(
-                "**Hydrodynamic concern:**"
-            )
-
-            for item in risk["hydro_flags"]:
-
-                st.write(
-                    f"• {item}"
-                )
-
-        if risk["biology_flags"]:
-
-            st.write(
-                "**Biological concern:**"
-            )
-
-            for item in risk["biology_flags"]:
-
-                st.write(
-                    f"• {item}"
-                )
-
-
-        st.markdown(
-            "### 🛠️ Suggested action"
-        )
-
-        st.info(
-            risk["action"]
-        )
-
-
-        st.markdown(
-            "### 🧪 Recommended validation"
-        )
-
-        st.success(
-            risk["validation"]
-        )
-
-
-        st.caption(
-            "Risk Guardian is a prototype rule/context-based "
-            "decision-support layer. It should not be interpreted "
-            "as a validated industrial failure probability."
-        )
-
-
-    # ========================================================
-    # TAB 3 — HEATMAP
-    # ========================================================
-
-    with tab3:
-
-        st.subheader(
-            "🔥 Interactive Operating-Region Heatmap"
-        )
-
-        st.write(
-            "Select any two numerical process or engineering "
-            "parameters to explore their effect on predicted VCD."
-        )
-
-
-        heatmap_parameters = [
-
-            "rpm",
-            "aeration_vvm",
-            "temperature_C",
-            "pH",
-            "DO_percent",
-            "feed_rate_mL_h",
-            "PV_V_L",
-            "kLa_per_h",
-            "mixing_time_s",
-            "OTR_mmol_L_h",
-            "Reynolds_number",
-            "tip_speed_m_s"
+            }
         ]
 
+    for message in st.session_state.copilot_messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-        h1, h2 = st.columns(2)
+    user_question = st.chat_input(
+        "Ask ScaleWise Copilot about this scale-up scenario…"
+    )
 
+    if user_question:
+        st.session_state.copilot_messages.append(
+            {"role": "user", "content": user_question}
+        )
 
-        with h1:
+        with st.chat_message("user"):
+            st.markdown(user_question)
 
-            x_parameter = st.selectbox(
-                "X-axis parameter",
-                heatmap_parameters,
-                index=0
-            )
-
-
-        with h2:
-
-            default_y = (
-                1
-                if heatmap_parameters[1]
-                != x_parameter
-                else 2
-            )
-
-            y_parameter = st.selectbox(
-                "Y-axis parameter",
-                heatmap_parameters,
-                index=default_y
-            )
-
-
-        if x_parameter == y_parameter:
-
-            st.warning(
-                "Please select two different parameters."
-            )
-
-        else:
-
-            with st.spinner(
-                "Generating ScaleWise heatmap..."
-            ):
-
-                heatmap_data = make_heatmap(
-                    x_parameter,
-                    y_parameter,
-                    input_df
+        with st.chat_message("assistant"):
+            with st.spinner("ScaleWise Copilot is analyzing the current run…"):
+                answer = copilot_answer(
+                    user_question,
+                    context,
+                    st.session_state.copilot_messages,
                 )
+            st.markdown(answer)
 
-
-            fig = px.imshow(
-                heatmap_data,
-                labels={
-                    "x":
-                        x_parameter,
-                    "y":
-                        y_parameter,
-                    "color":
-                        "Predicted VCD"
-                },
-                aspect="auto",
-                origin="lower"
-            )
-
-            fig.update_layout(
-                title=(
-                    f"Predicted VCD: "
-                    f"{x_parameter} vs {y_parameter}"
-                ),
-                height=600
-            )
-
-            st.plotly_chart(
-                fig,
-                use_container_width=True
-            )
-
-
-            st.caption(
-                "Heatmap values represent model-predicted VCD "
-                "for the selected parameter combinations while "
-                "other inputs are held at the current process "
-                "configuration."
-            )
-
-
-            st.dataframe(
-                heatmap_data,
-                use_container_width=True
-            )
-
-
-    # ========================================================
-    # TAB 4 — AI COPILOT
-    # ========================================================
-
-    with tab4:
-
-        st.subheader(
-            "🤖 ScaleWise AI Copilot"
-        )
-
-        st.write(
-            "Ask questions about the current scale-up scenario."
+        st.session_state.copilot_messages.append(
+            {"role": "assistant", "content": answer}
         )
 
 
-        # ----------------------------------------------------
-        # Initialize chat
-        # ----------------------------------------------------
-
-        if "copilot_messages" not in st.session_state:
-
-            st.session_state.copilot_messages = []
-
-
-        # ----------------------------------------------------
-        # Display previous messages
-        # ----------------------------------------------------
-
-        for message in st.session_state[
-            "copilot_messages"
-        ]:
-
-            with st.chat_message(
-                message["role"]
-            ):
-
-                st.markdown(
-                    message["content"]
-                )
-
-
-        # ----------------------------------------------------
-        # Chat input
-        # ----------------------------------------------------
-
-        question = st.chat_input(
-            "Ask ScaleWise anything about this process..."
-        )
-
-
-        # ----------------------------------------------------
-        # Generate answer
-        # ----------------------------------------------------
-
-        if question:
-
-            st.session_state[
-                "copilot_messages"
-            ].append(
-                {
-                    "role": "user",
-                    "content": question
-                }
-            )
-
-
-            q = question.lower()
-
-
-            # ----------------------------------------------
-            # Answer engine
-            # ----------------------------------------------
-
-            if (
-                "risk" in q
-                or "danger" in q
-                or "warning" in q
-            ):
-
-                answer = f"""
-### Current Risk Assessment
-
-**Risk level:** {risk['risk_band']}
-
-**Process status:** {risk['status']}
-
-**Confidence:** {risk['confidence']:.1f}%
-
-**Warning:**  
-{risk['warning']}
-
-**Suggested action:**  
-{risk['action']}
-
-**Recommended validation:**  
-{risk['validation']}
-"""
-
-
-            elif (
-                "vcd" in q
-                or "biology" in q
-                or "prediction" in q
-            ):
-
-                answer = f"""
-### Predicted Biological Performance
-
-- **VCD:** {predictions.get('VCD_million_cells_mL', np.nan):.3f} million cells/mL
-- **Viability:** {predictions.get('viability_percent', np.nan):.2f}%
-- **Growth rate:** {predictions.get('growth_rate_per_h', np.nan):.4f} /h
-- **Lactate:** {predictions.get('lactate_g_L', np.nan):.3f} g/L
-"""
-
-
-            elif (
-                "oxygen" in q
-                or "kla" in q
-                or "otr" in q
-                or "do" in q
-            ):
-
-                answer = f"""
-### Oxygen-Transfer Assessment
-
-- **DO:** {input_df.iloc[0]['DO_percent']:.2f}%
-- **kLa:** {input_df.iloc[0]['kLa_per_h']:.3f} /h
-- **OTR:** {input_df.iloc[0]['OTR_mmol_L_h']:.3f} mmol/L/h
-
-The Risk Guardian currently reports:
-
-**{len(risk['oxygen_flags'])} oxygen-transfer warning(s).**
-"""
-
-
-            elif (
-                "mixing" in q
-                or "hydrodynamic" in q
-                or "impeller" in q
-                or "agitation" in q
-            ):
-
-                answer = f"""
-### Hydrodynamic Assessment
-
-- **Agitation:** {input_df.iloc[0]['rpm']:.1f} rpm
-- **Mixing time:** {input_df.iloc[0]['mixing_time_s']:.2f} s
-- **Tip speed:** {input_df.iloc[0]['tip_speed_m_s']:.3f} m/s
-- **Reynolds number:** {input_df.iloc[0]['Reynolds_number']:.0f}
-
-Current hydrodynamic warnings:
-
-**{len(risk['hydro_flags'])}**
-"""
-
-
-            elif (
-                "status" in q
-                or "conditional" in q
-                or "readiness" in q
-            ):
-
-                answer = f"""
-### Process Readiness
-
-**Score:** {risk['score']:.1f}/100
-
-**Status:** {risk['status']}
-
-Conditional means that the current scenario is not
-automatically classified as a failure. It means the
-selected operating condition requires additional
-validation before being considered suitable for
-scale-up.
-"""
-
-
-            elif (
-                "validate" in q
-                or "validation" in q
-                or "experiment" in q
-            ):
-
-                answer = f"""
-### Recommended Validation
-
-{risk['validation']}
-
-The most important current action is:
-
-**{risk['action']}**
-"""
-
-
-            elif (
-                "scale" in q
-                or "target" in q
-            ):
-
-                answer = f"""
-### Current Scale-Up Configuration
-
-- **Target scale:** {target_scale:g} L
-- **Cell line:** {cell_line}
-- **Immobilization:** {immobilization}
-- **Agitation:** {rpm:.1f} rpm
-- **Aeration:** {aeration:.3f} vvm
-- **Temperature:** {temperature:.2f} °C
-- **pH:** {pH:.2f}
-- **DO:** {DO:.1f}%
-
-Current readiness:
-
-**{risk['score']:.1f}/100 — {risk['status']}**
-"""
-
-
-            else:
-
-                answer = f"""
-### ScaleWise Process Summary
-
-The current target is **{target_scale:g} L**.
-
-The model predicts:
-
-- VCD: **{predictions.get('VCD_million_cells_mL', np.nan):.3f} million cells/mL**
-- Viability: **{predictions.get('viability_percent', np.nan):.2f}%**
-- Growth rate: **{predictions.get('growth_rate_per_h', np.nan):.4f}/h**
-- Lactate: **{predictions.get('lactate_g_L', np.nan):.3f} g/L**
-
-Process readiness is:
-
-**{risk['score']:.1f}/100 — {risk['status']}**
-
-You can ask me about **risk, VCD, biology, oxygen transfer,
-mixing, hydrodynamics, scale-up, readiness or validation.**
-"""
-
-
-            # ----------------------------------------------
-            # Save assistant response
-            # ----------------------------------------------
-
-            st.session_state[
-                "copilot_messages"
-            ].append(
-                {
-                    "role": "assistant",
-                    "content": answer
-                }
-            )
-
-
-            st.rerun()
-
-
-# ============================================================
-# FOOTER
-# ============================================================
-
-st.divider()
-
-st.caption(
-    "ScaleWise is a decision-support prototype. "
-    "Final process decisions require experimental and "
-    "process-specific validation."
+# -----------------------------
+# Download current assessment
+# -----------------------------
+assessment = {
+    "target_scale_L": target_scale,
+    "cell_line": cell_line,
+    "medium": medium,
+    "serum_condition": serum_condition,
+    "process_stage": process_stage,
+    "risk_score": risk["risk_score"],
+    "risk_level": risk["risk_level"],
+    "assessment_confidence_percent": risk["confidence"],
+    "risk_factors": "; ".join(f["message"] for f in risk["factors"]),
+    "suggested_action": risk["suggested_action"],
+    "recommended_validation": "; ".join(risk["recommended_validation"]),
+    **physics,
+    **predictions.iloc[0].to_dict(),
+}
+
+st.sidebar.divider()
+st.sidebar.download_button(
+    "⬇️ Download current assessment",
+    data=pd.DataFrame([assessment]).to_csv(index=False),
+    file_name="scalewise_current_assessment.csv",
+    mime="text/csv",
 )
