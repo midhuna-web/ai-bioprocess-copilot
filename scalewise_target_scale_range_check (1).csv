@@ -1,0 +1,10 @@
+Parameter,Predicted_Value,Target_Scale_Min,Target_Scale_Max,Within_Observed_Range
+rpm,220.0,70.0,320.0,True
+aeration_vvm,0.5,0.01,0.14,False
+DO_percent,50.0,25.0,55.0,True
+PV_V_L,0.9832584511365249,0.75,0.9,False
+kLa_per_h,204.8895599633784,18.0,79.04,False
+mixing_time_s,12.874310533709773,5.0,44.27,True
+OTR_mmol_L_h,468.52641067856797,24.5,170.68,False
+Reynolds_number,64311.03614457832,18319.0,108158.0,True
+tip_speed_m_s,1.5962118113624377,0.48,2.5,True
